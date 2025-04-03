@@ -1,0 +1,86 @@
+package routes
+
+import (
+	"net/http"
+
+	"github.com/Govind-619/ReadSphere/controllers"
+	"github.com/Govind-619/ReadSphere/middleware"
+	"github.com/gin-gonic/gin"
+)
+
+// initUserRoutes initializes all user-related routes
+func initUserRoutes(router *gin.RouterGroup) {
+	// Public routes (no authentication required)
+	// Page routes
+	router.GET("/login", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Login page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	router.GET("/signup", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Signup page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	router.GET("/verify-otp", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Verify OTP page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	router.GET("/forgot-password", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Forgot password page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	router.GET("/verify-reset-otp", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Verify reset OTP page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	router.GET("/reset-password", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Reset password page loaded successfully",
+			"status":  "success",
+		})
+	})
+
+	// API routes
+	router.POST("/register", controllers.RegisterUser)
+	router.POST("/login", controllers.LoginUser)
+	router.POST("/verify-otp", controllers.VerifyOTP)
+	router.POST("/forgot-password", controllers.ForgotPassword)
+	router.POST("/verify-reset-otp", controllers.VerifyResetOTP)
+	router.POST("/reset-password", controllers.ResetPassword)
+	router.GET("/products", controllers.ListProducts)
+	router.GET("/products/:id", controllers.GetProductDetails)
+
+	// Protected routes (require authentication)
+	protected := router.Group("")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		// Cart operations
+		protected.POST("/cart/add", controllers.AddToCart)
+		protected.GET("/cart", controllers.GetCart)
+		protected.PUT("/cart/update", controllers.UpdateCart)
+		protected.DELETE("/cart/remove", controllers.RemoveFromCart)
+
+		// Wishlist operations
+		protected.POST("/wishlist/add", controllers.AddToWishlist)
+		protected.GET("/wishlist", controllers.GetWishlist)
+		protected.DELETE("/wishlist/remove", controllers.RemoveFromWishlist)
+
+		// Reviews
+		protected.POST("/products/:id/review", controllers.AddReview)
+		protected.GET("/products/:id/reviews", controllers.GetProductReviews)
+	}
+}

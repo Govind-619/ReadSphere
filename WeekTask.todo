@@ -1,0 +1,47 @@
+Admin Side:
+
+☐ Admin Sign-In
+
+User Management:
+
+☐ Block/Unblock user (with confirmation prompt)
+☐ Backend search functionality with a cancel/clear option
+☐ Backend pagination
+☐ Table sorted in descending order (latest data first)
+
+Category Management:
+
+☐ Add, Edit, and soft Delete categories
+☐ Backend search with cancel/clear option
+☐ Backend pagination
+☐ Table sorted in descending order
+
+Product Management:
+
+☐ Add, Edit, and soft Delete products
+☐ Multi-image upload (minimum 3 images via a single file field)
+☐ Image cropping and resizing before upload
+
+User Side:
+    
+☐ Home Page Design
+
+User Authentication:
+
+☐ Sign-Up & Login with validation
+☐ OTP-based sign-up (with OTP timer and resend option)
+☐ Single Sign-On (Google, Facebook, etc.)
+☐ Forgot password functionality
+
+Product Listing:
+
+☐ Display products with backend search (with cancel/clear), pagination, and sorting options (price low-to-high, high-to-low, A-Z, Z-A; optionally, popularity, average ratings, new arrivals, featured)
+☐ Filtering options by category, price range, and optionally brand
+☐ Ensure blocked/unlisted products remain hidden
+
+Product Details Page:
+
+☐ Detailed product view with image zoom
+☐ Include breadcrumbs, ratings, price, discounts, reviews, stock status, product highlights/specs, and related product recommendations
+☐ Redirect to the product listing page if a product is blocked or unavailable (e.g., when clicking "Add to Cart")
+
