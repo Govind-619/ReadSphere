@@ -106,7 +106,7 @@ func InitDB() {
 		&models.User{},
 		&models.Admin{},
 		&models.Category{},
-		&models.Product{},
+		&models.Book{},
 		&models.Review{},
 		&models.PasswordHistory{},
 	)

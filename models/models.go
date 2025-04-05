@@ -28,49 +28,74 @@ type User struct {
 // Admin represents an administrator in the system
 type Admin struct {
 	gorm.Model
-	Email    string `gorm:"uniqueIndex;not null" json:"email"`
-	Password string `json:"-"`
+	Email     string    `gorm:"uniqueIndex;not null" json:"email"`
+	Password  string    `json:"-"`
+	FirstName string    `json:"first_name"`
+	LastName  string    `json:"last_name"`
+	LastLogin time.Time `json:"last_login"`
+	IsActive  bool      `json:"is_active" gorm:"default:true"`
 }
 
 // Category represents a product category
 type Category struct {
 	gorm.Model
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Products    []Product `json:"products,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Books       []Book `json:"books,omitempty"`
 }
 
-// Product represents a product in the system
-type Product struct {
+// Book represents a book in the system
+type Book struct {
 	gorm.Model
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Price       float64  `json:"price"`
-	Stock       int      `json:"stock"`
-	CategoryID  uint     `json:"category_id"`
-	Category    Category `json:"category,omitempty"`
-	ImageURL    string   `json:"image_url"`
-	Images      []string `json:"images" gorm:"type:text[]"`
-	IsActive    bool     `json:"is_active" gorm:"default:true"`
-	Reviews     []Review `json:"reviews,omitempty"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Price           float64  `json:"price"`
+	Stock           int      `json:"stock"`
+	CategoryID      uint     `json:"category_id"`
+	Category        Category `json:"category,omitempty"`
+	ImageURL        string   `json:"image_url"`
+	Images          []string `json:"images" gorm:"type:text[]"`
+	IsActive        bool     `json:"is_active" gorm:"default:true"`
+	IsFeatured      bool     `json:"is_featured" gorm:"default:false"`
+	Views           int      `json:"views" gorm:"default:0"`
+	Reviews         []Review `json:"reviews,omitempty"`
+	AverageRating   float64  `json:"average_rating" gorm:"default:0"`
+	TotalReviews    int      `json:"total_reviews" gorm:"default:0"`
+	Author          string   `json:"author"`
+	Publisher       string   `json:"publisher"`
+	ISBN            string   `json:"isbn" gorm:"uniqueIndex"`
+	PublicationYear int      `json:"publication_year"`
+	Genre           string   `json:"genre"`
+	Pages           int      `json:"pages"`
 }
 
-// Review represents a product review
+// Review represents a book review
 type Review struct {
 	gorm.Model
-	UserID    uint    `json:"user_id"`
-	User      User    `json:"user,omitempty"`
-	ProductID uint    `json:"product_id"`
-	Product   Product `json:"product,omitempty"`
-	Rating    int     `json:"rating"`
-	Comment   string  `json:"comment"`
+	BookID     uint   `json:"book_id"`
+	UserID     uint   `json:"user_id"`
+	User       User   `json:"user"`
+	Rating     int    `json:"rating" gorm:"check:rating >= 1 AND rating <= 5"`
+	Comment    string `json:"comment"`
+	IsApproved bool   `json:"is_approved" gorm:"default:false"`
 }
 
 type Cart struct {
 	gorm.Model
-	UserID    uint    `json:"user_id"`
-	User      User    `gorm:"foreignKey:UserID" json:"user"`
-	ProductID uint    `json:"product_id"`
-	Product   Product `gorm:"foreignKey:ProductID" json:"product"`
-	Quantity  int     `json:"quantity"`
+	UserID   uint `json:"user_id"`
+	User     User `gorm:"foreignKey:UserID" json:"user"`
+	BookID   uint `json:"book_id"`
+	Book     Book `gorm:"foreignKey:BookID" json:"book"`
+	Quantity int  `json:"quantity"`
+}
+
+// Order represents an order in the system
+type Order struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `json:"user_id"`
+	User        User      `json:"user"`
+	TotalAmount float64   `json:"total_amount"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }

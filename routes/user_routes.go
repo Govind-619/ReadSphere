@@ -61,8 +61,12 @@ func initUserRoutes(router *gin.RouterGroup) {
 	router.POST("/forgot-password", controllers.ForgotPassword)
 	router.POST("/verify-reset-otp", controllers.VerifyResetOTP)
 	router.POST("/reset-password", controllers.ResetPassword)
-	router.GET("/products", controllers.ListProducts)
-	router.GET("/products/:id", controllers.GetProductDetails)
+
+	// Book routes
+	router.GET("/books", controllers.GetBooks)
+	router.GET("/books/:id", controllers.GetBookDetails)
+	router.GET("/categories", controllers.ListCategories)
+	router.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
 	// Protected routes (require authentication)
 	protected := router.Group("")
@@ -80,7 +84,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.DELETE("/wishlist/remove", controllers.RemoveFromWishlist)
 
 		// Reviews
-		protected.POST("/products/:id/review", controllers.AddReview)
-		protected.GET("/products/:id/reviews", controllers.GetProductReviews)
+		protected.POST("/books/:id/review", controllers.AddReview)
+		protected.GET("/books/:id/reviews", controllers.GetBookReviews)
 	}
 }

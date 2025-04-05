@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -563,80 +562,6 @@ func ResetPassword(c *gin.Context) {
 			"url":     "/login",
 			"message": "Please login with your new password",
 		},
-	})
-}
-
-func ListProducts(c *gin.Context) {
-	var products []models.Product
-	pageStr := c.DefaultQuery("page", "1")
-	limitStr := c.DefaultQuery("limit", "10")
-	search := c.Query("search")
-	sort := c.Query("sort")
-	category := c.Query("category")
-	minPrice := c.Query("min_price")
-	maxPrice := c.Query("max_price")
-
-	// Convert page and limit to integers
-	page, err := strconv.Atoi(pageStr)
-	if err != nil {
-		page = 1
-	}
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil {
-		limit = 10
-	}
-
-	query := config.DB.Model(&models.Product{}).Where("is_active = ?", true)
-
-	if search != "" {
-		query = query.Where("name LIKE ? OR description LIKE ?", "%"+search+"%", "%"+search+"%")
-	}
-
-	if category != "" {
-		query = query.Where("category_id = ?", category)
-	}
-
-	if minPrice != "" {
-		query = query.Where("price >= ?", minPrice)
-	}
-
-	if maxPrice != "" {
-		query = query.Where("price <= ?", maxPrice)
-	}
-
-	// Sorting
-	switch sort {
-	case "price_asc":
-		query = query.Order("price ASC")
-	case "price_desc":
-		query = query.Order("price DESC")
-	case "name_asc":
-		query = query.Order("name ASC")
-	case "name_desc":
-		query = query.Order("name DESC")
-	default:
-		query = query.Order("created_at DESC")
-	}
-
-	// Get total count
-	var total int64
-	query.Count(&total)
-
-	// Pagination
-	offset := (page - 1) * limit
-	query = query.Offset(offset).Limit(limit)
-
-	// Get products
-	if err := query.Find(&products).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch products"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"products": products,
-		"total":    total,
-		"page":     page,
-		"limit":    limit,
 	})
 }
 

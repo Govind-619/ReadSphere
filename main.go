@@ -23,6 +23,16 @@ func main() {
 	// Initialize database
 	config.InitDB()
 
+	// Create sample admin
+	if err := controllers.CreateSampleAdmin(); err != nil {
+		log.Fatal("Failed to create sample admin:", err)
+	}
+
+	// Create default category if none exists
+	if err := controllers.CreateDefaultCategory(); err != nil {
+		log.Fatal("Failed to create default category:", err)
+	}
+
 	// Initialize Google OAuth
 	config.InitGoogleOAuth()
 

@@ -1,80 +1,157 @@
 package controllers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
+	"golang.org/x/crypto/bcrypt"
 )
 
-func AdminLogin(c *gin.Context) {
-	var loginData struct {
-		Email    string `json:"email" binding:"required,email"`
-		Password string `json:"password" binding:"required"`
-	}
+// AdminLoginRequest represents the admin login request
+type AdminLoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
 
-	if err := c.ShouldBindJSON(&loginData); err != nil {
+// AdminLogin handles admin authentication
+func AdminLogin(c *gin.Context) {
+	var req AdminLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
 		return
 	}
 
-	// Check if admin credentials match
-	if loginData.Email != os.Getenv("Admin_Email") || loginData.Password != os.Getenv("Admin_Password") {
+	log.Printf("Admin login attempt for email: %s", req.Email)
+
+	var admin models.Admin
+	if err := config.DB.Where("email = ?", req.Email).First(&admin).Error; err != nil {
+		log.Printf("Admin not found: %v", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	// Generate JWT token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"email": loginData.Email,
-		"role":  "admin",
-		"exp":   time.Now().Add(time.Hour * 24).Unix(),
-	})
-
-	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+	if !admin.IsActive {
+		log.Printf("Admin account is inactive: %s", admin.Email)
+		c.JSON(http.StatusForbidden, gin.H{"error": "Admin account is inactive"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password)); err != nil {
+		log.Printf("Invalid password for admin: %s", admin.Email)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// Update last login
+	admin.LastLogin = time.Now()
+	config.DB.Save(&admin)
+
+	// Generate JWT token with simpler claims
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"admin_id": admin.ID,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	// Get JWT secret from environment
+	jwtSecret := os.Getenv("JWT_SECRET")
+	log.Printf("JWT Secret length for token generation: %d", len(jwtSecret))
+
+	if jwtSecret == "" {
+		log.Printf("JWT secret not configured for token generation")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "JWT secret not configured"})
+		return
+	}
+
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		log.Printf("Failed to generate token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
+		return
+	}
+
+	log.Printf("Token generated successfully for admin: %s", admin.Email)
+	log.Printf("Token: %s", tokenString)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Login successful",
+		"status":  "success",
+		"token":   tokenString,
+		"admin": gin.H{
+			"id":        admin.ID,
+			"email":     admin.Email,
+			"firstName": admin.FirstName,
+			"lastName":  admin.LastName,
+		},
+	})
 }
 
-func AdminLogout(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+// UserListRequest represents the request parameters for user listing
+type UserListRequest struct {
+	Page   int    `form:"page" binding:"min=1"`
+	Limit  int    `form:"limit" binding:"min=1,max=100"`
+	Search string `form:"search"`
+	SortBy string `form:"sort_by"`
+	Order  string `form:"order" binding:"oneof=asc desc"`
 }
 
+// GetUsers handles user listing with search, pagination, and sorting
 func GetUsers(c *gin.Context) {
-	var users []models.User
-	pageStr := c.DefaultQuery("page", "1")
-	limitStr := c.DefaultQuery("limit", "10")
-	search := c.Query("search")
+	var req UserListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set defaults
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.Limit == 0 {
+		req.Limit = 10
+	}
+	if req.Order == "" {
+		req.Order = "desc"
+	}
 
 	query := config.DB.Model(&models.User{})
 
-	if search != "" {
-		query = query.Where("email LIKE ? OR first_name LIKE ? OR last_name LIKE ?",
-			"%"+search+"%", "%"+search+"%", "%"+search+"%")
+	// Apply search
+	if req.Search != "" {
+		searchTerm := "%" + req.Search + "%"
+		query = query.Where(
+			"email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?",
+			searchTerm, searchTerm, searchTerm,
+		)
+	}
+
+	// Apply sorting
+	switch req.SortBy {
+	case "email":
+		query = query.Order(fmt.Sprintf("email %s", req.Order))
+	case "name":
+		query = query.Order(fmt.Sprintf("first_name %s, last_name %s", req.Order, req.Order))
+	case "created_at":
+		query = query.Order(fmt.Sprintf("created_at %s", req.Order))
+	default:
+		query = query.Order("created_at desc")
 	}
 
 	// Get total count
 	var total int64
 	query.Count(&total)
 
-	// Convert page and limit to integers
-	page, _ := strconv.Atoi(pageStr)
-	limit, _ := strconv.Atoi(limitStr)
+	// Apply pagination
+	offset := (req.Page - 1) * req.Limit
+	query = query.Offset(offset).Limit(req.Limit)
 
-	// Pagination
-	offset := (page - 1) * limit
-	query = query.Offset(offset).Limit(limit)
-
-	// Get users
+	var users []models.User
 	if err := query.Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
 		return
@@ -82,30 +159,160 @@ func GetUsers(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"users": users,
-		"total": total,
-		"page":  page,
-		"limit": limit,
+		"pagination": gin.H{
+			"total":       total,
+			"page":        req.Page,
+			"limit":       req.Limit,
+			"total_pages": (total + int64(req.Limit) - 1) / int64(req.Limit),
+		},
 	})
 }
 
+// BlockUser handles blocking/unblocking a user
 func BlockUser(c *gin.Context) {
 	userID := c.Param("id")
+	var user models.User
 
-	if err := config.DB.Model(&models.User{}).Where("id = ?", userID).Update("is_blocked", true).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to block user"})
+	if err := config.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User blocked successfully"})
+	// Toggle block status
+	user.IsBlocked = !user.IsBlocked
+	if err := config.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		return
+	}
+
+	action := "blocked"
+	if !user.IsBlocked {
+		action = "unblocked"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("User %s successfully", action),
+		"user":    user,
+	})
 }
 
-func UnblockUser(c *gin.Context) {
-	userID := c.Param("id")
+// AdminLogout handles admin logout
+func AdminLogout(c *gin.Context) {
+	// In a JWT-based system, logout is handled client-side by removing the token
+	// We can add additional server-side cleanup if needed
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+}
 
-	if err := config.DB.Model(&models.User{}).Where("id = ?", userID).Update("is_blocked", false).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unblock user"})
-		return
+// CreateSampleAdmin creates a sample admin user
+func CreateSampleAdmin() error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(os.Getenv("ADMIN_PASSWORD")), bcrypt.DefaultCost)
+	if err != nil {
+		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User unblocked successfully"})
+	admin := models.Admin{
+		Email:     os.Getenv("ADMIN_EMAIL"),
+		Password:  string(hashedPassword),
+		FirstName: os.Getenv("ADMIN_FIRST_NAME"),
+		LastName:  os.Getenv("ADMIN_LAST_NAME"),
+		IsActive:  true,
+	}
+
+	return config.DB.FirstOrCreate(&admin, models.Admin{Email: admin.Email}).Error
+}
+
+// DashboardOverview represents the admin dashboard overview data
+type DashboardOverview struct {
+	TotalSales     int64            `json:"total_sales"`
+	TotalOrders    int64            `json:"total_orders"`
+	TotalRevenue   float64          `json:"total_revenue"`
+	TotalCustomers int64            `json:"total_customers"`
+	RecentOrders   []models.Order   `json:"recent_orders"`
+	TopBooks       []models.Book    `json:"top_books"`
+	NavigationMenu []NavigationItem `json:"navigation_menu"`
+}
+
+// NavigationItem represents a menu item in the dashboard navigation
+type NavigationItem struct {
+	Title    string           `json:"title"`
+	Path     string           `json:"path"`
+	Icon     string           `json:"icon"`
+	Children []NavigationItem `json:"children,omitempty"`
+}
+
+// GetDashboardOverview returns the admin dashboard overview
+func GetDashboardOverview(c *gin.Context) {
+	var overview DashboardOverview
+
+	// Get total sales count
+	config.DB.Model(&models.Order{}).Count(&overview.TotalOrders)
+
+	// Get total revenue
+	config.DB.Model(&models.Order{}).Select("COALESCE(SUM(total_amount), 0)").Scan(&overview.TotalRevenue)
+
+	// Get total customers
+	config.DB.Model(&models.User{}).Count(&overview.TotalCustomers)
+
+	// Get recent orders (last 5)
+	config.DB.Preload("User").Order("created_at desc").Limit(5).Find(&overview.RecentOrders)
+
+	// Get top books (by views)
+	config.DB.Preload("Category").Order("views desc").Limit(5).Find(&overview.TopBooks)
+
+	// Define navigation menu
+	overview.NavigationMenu = []NavigationItem{
+		{
+			Title: "Dashboard",
+			Path:  "/admin/dashboard",
+			Icon:  "dashboard",
+		},
+		{
+			Title: "Book Management",
+			Path:  "/admin/books",
+			Icon:  "book",
+			Children: []NavigationItem{
+				{Title: "All Books", Path: "/admin/books", Icon: "list"},
+				{Title: "Add Book", Path: "/admin/books/new", Icon: "add"},
+				{Title: "Categories", Path: "/admin/categories", Icon: "category"},
+			},
+		},
+		{
+			Title: "Order Management",
+			Path:  "/admin/orders",
+			Icon:  "shopping_cart",
+			Children: []NavigationItem{
+				{Title: "All Orders", Path: "/admin/orders", Icon: "list"},
+				{Title: "Pending Orders", Path: "/admin/orders/pending", Icon: "pending"},
+			},
+		},
+		{
+			Title: "Customer Management",
+			Path:  "/admin/users",
+			Icon:  "people",
+			Children: []NavigationItem{
+				{Title: "All Customers", Path: "/admin/users", Icon: "list"},
+				{Title: "Blocked Users", Path: "/admin/users/blocked", Icon: "block"},
+			},
+		},
+		{
+			Title: "Reports",
+			Path:  "/admin/reports",
+			Icon:  "analytics",
+			Children: []NavigationItem{
+				{Title: "Sales Report", Path: "/admin/reports/sales", Icon: "trending_up"},
+				{Title: "Customer Report", Path: "/admin/reports/customers", Icon: "people"},
+			},
+		},
+		{
+			Title: "Settings",
+			Path:  "/admin/settings",
+			Icon:  "settings",
+		},
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Dashboard overview loaded successfully",
+		"status":   "success",
+		"overview": overview,
+	})
 }

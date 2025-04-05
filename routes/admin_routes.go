@@ -11,28 +11,43 @@ func initAdminRoutes(router *gin.RouterGroup) {
 	admin := router.Group("/admin")
 	{
 		// Public admin routes
+		admin.GET("/login", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"message": "Admin login page loaded successfully",
+				"status":  "success",
+			})
+		})
 		admin.POST("/login", controllers.AdminLogin)
 		admin.POST("/logout", controllers.AdminLogout)
 
 		// Protected admin routes
-		admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware())
+		admin.Use(middleware.AdminAuthMiddleware())
 		{
+			// Dashboard
+			admin.GET("/dashboard", controllers.GetDashboardOverview)
+
 			// User management
 			admin.GET("/users", controllers.GetUsers)
-			admin.PATCH("/users/:id/block", controllers.BlockUser)
-			admin.PATCH("/users/:id/unblock", controllers.UnblockUser)
+			admin.PUT("/users/:id/block", controllers.BlockUser)
 
 			// Category management
-			admin.POST("/categories", controllers.CreateCategory)
 			admin.GET("/categories", controllers.GetCategories)
+			admin.POST("/categories", controllers.CreateCategory)
 			admin.PUT("/categories/:id", controllers.UpdateCategory)
 			admin.DELETE("/categories/:id", controllers.DeleteCategory)
+			admin.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
-			// Product management
-			admin.POST("/products", controllers.CreateProduct)
-			admin.GET("/products", controllers.GetProducts)
-			admin.PUT("/products/:id", controllers.UpdateProduct)
-			admin.DELETE("/products/:id", controllers.DeleteProduct)
+			// Book management
+			admin.GET("/books", controllers.GetBooks)
+			admin.POST("/books", controllers.CreateBook)
+			admin.PUT("/books/field/:field/:value", controllers.UpdateBookByField)
+			admin.GET("/books/:id", controllers.GetBookDetails)
+			admin.PUT("/books/:id", controllers.UpdateBook)
+			admin.DELETE("/books/:id", controllers.DeleteBook)
+			admin.GET("/books/:id/check", controllers.CheckBookExists)
+			admin.GET("/books/:id/reviews", controllers.GetBookReviews)
+			admin.PUT("/books/:id/reviews/:reviewId/approve", controllers.ApproveReview)
+			admin.DELETE("/books/:id/reviews/:reviewId", controllers.DeleteReview)
 		}
 	}
 }

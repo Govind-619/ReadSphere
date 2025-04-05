@@ -87,31 +87,31 @@ func CreateTestCategory(t *testing.T) *models.Category {
 	return category
 }
 
-// CreateTestProduct creates a test product
-func CreateTestProduct(t *testing.T, categoryID uint) *models.Product {
-	product := &models.Product{
-		Name:        "Test Product",
-		Description: "Test Product Description",
+// CreateTestBook creates a test book
+func CreateTestBook(t *testing.T, categoryID uint) *models.Book {
+	book := &models.Book{
+		Name:        "Test Book",
+		Description: "Test Book Description",
 		Price:       99.99,
 		Stock:       100,
 		CategoryID:  categoryID,
 		ImageURL:    "test.jpg",
 	}
 
-	if err := CreateProduct(product); err != nil {
-		t.Fatalf("Failed to create test product: %v", err)
+	if err := CreateBook(book); err != nil {
+		t.Fatalf("Failed to create test book: %v", err)
 	}
 
-	return product
+	return book
 }
 
 // CreateTestReview creates a test review
-func CreateTestReview(t *testing.T, userID, productID uint) *models.Review {
+func CreateTestReview(t *testing.T, userID, bookID uint) *models.Review {
 	review := &models.Review{
-		UserID:    userID,
-		ProductID: productID,
-		Rating:    5,
-		Comment:   "Test Review",
+		UserID:  userID,
+		BookID:  bookID,
+		Rating:  5,
+		Comment: "Test Review",
 	}
 
 	if err := CreateReview(review); err != nil {

@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"log"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -82,29 +83,128 @@ func DeleteCategory(id uint) error {
 	return config.DB.Delete(&models.Category{}, id).Error
 }
 
-// CreateProduct creates a new product
-func CreateProduct(product *models.Product) error {
-	return config.DB.Create(product).Error
+// CreateBook creates a new book
+func CreateBook(book *models.Book) error {
+	return config.DB.Create(book).Error
 }
 
-// GetProductByID retrieves a product by ID
-func GetProductByID(id uint) (*models.Product, error) {
-	var product models.Product
-	err := config.DB.Preload("Category").Preload("Reviews").First(&product, id).Error
+// GetBookByID retrieves a book by ID
+func GetBookByID(id uint) (*models.Book, error) {
+	// First, fetch the book without the images field
+	var book models.Book
+	err := config.DB.Preload("Category").Preload("Reviews").First(&book, id).Error
 	if err != nil {
 		return nil, err
 	}
-	return &product, nil
+
+	// Now fetch the images separately
+	var images []string
+	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", id).Scan(&images).Error; err != nil {
+		log.Printf("Failed to fetch images for book %d: %v", id, err)
+		// Continue anyway, as we have the book data
+	} else {
+		book.Images = images
+	}
+
+	return &book, nil
 }
 
-// UpdateProduct updates a product
-func UpdateProduct(product *models.Product) error {
-	return config.DB.Save(product).Error
+// UpdateBook updates a book
+func UpdateBook(book *models.Book) error {
+	return config.DB.Save(book).Error
 }
 
-// DeleteProduct deletes a product
-func DeleteProduct(id uint) error {
-	return config.DB.Delete(&models.Product{}, id).Error
+// DeleteBook deletes a book
+func DeleteBook(id uint) error {
+	return config.DB.Delete(&models.Book{}, id).Error
+}
+
+// GetBooksByCategory retrieves books by category ID with pagination
+func GetBooksByCategory(categoryID uint, page, limit int) ([]models.Book, int64, error) {
+	var books []models.Book
+	var total int64
+
+	// Get total count
+	err := config.DB.Model(&models.Book{}).Where("category_id = ?", categoryID).Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated books using a raw SQL query to handle the text[] column properly
+	offset := (page - 1) * limit
+	sqlQuery := `
+		SELECT 
+			id, created_at, updated_at, deleted_at, 
+			name, description, price, stock, category_id, 
+			image_url, is_active, is_featured, views, 
+			average_rating, total_reviews, author, publisher, 
+			isbn, publication_year, genre, pages
+		FROM books 
+		WHERE category_id = ? AND deleted_at IS NULL
+		OFFSET ? LIMIT ?
+	`
+
+	if err := config.DB.Raw(sqlQuery, categoryID, offset, limit).Scan(&books).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Now fetch the images separately for each book
+	for i := range books {
+		var images []string
+		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
+			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
+			// Continue anyway, as we have the book data
+		} else {
+			books[i].Images = images
+		}
+	}
+
+	return books, total, nil
+}
+
+// SearchBooks searches books by name or description
+func SearchBooks(query string, page, limit int) ([]models.Book, int64, error) {
+	var books []models.Book
+	var total int64
+
+	// Get total count
+	err := config.DB.Model(&models.Book{}).
+		Where("name ILIKE ? OR description ILIKE ?", "%"+query+"%", "%"+query+"%").
+		Count(&total).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated books using a raw SQL query to handle the text[] column properly
+	offset := (page - 1) * limit
+	sqlQuery := `
+		SELECT 
+			id, created_at, updated_at, deleted_at, 
+			name, description, price, stock, category_id, 
+			image_url, is_active, is_featured, views, 
+			average_rating, total_reviews, author, publisher, 
+			isbn, publication_year, genre, pages
+		FROM books 
+		WHERE (name ILIKE ? OR description ILIKE ?) AND deleted_at IS NULL
+		OFFSET ? LIMIT ?
+	`
+
+	if err := config.DB.Raw(sqlQuery, "%"+query+"%", "%"+query+"%", offset, limit).Scan(&books).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Now fetch the images separately for each book
+	for i := range books {
+		var images []string
+		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
+			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
+			// Continue anyway, as we have the book data
+		} else {
+			books[i].Images = images
+		}
+	}
+
+	return books, total, nil
 }
 
 // CreateReview creates a new review
@@ -130,58 +230,6 @@ func UpdateReview(review *models.Review) error {
 // DeleteReview deletes a review
 func DeleteReview(id uint) error {
 	return config.DB.Delete(&models.Review{}, id).Error
-}
-
-// GetProductsByCategory retrieves products by category ID with pagination
-func GetProductsByCategory(categoryID uint, page, limit int) ([]models.Product, int64, error) {
-	var products []models.Product
-	var total int64
-
-	// Get total count
-	err := config.DB.Model(&models.Product{}).Where("category_id = ?", categoryID).Count(&total).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// Get paginated products
-	offset := (page - 1) * limit
-	err = config.DB.Preload("Category").
-		Where("category_id = ?", categoryID).
-		Offset(offset).
-		Limit(limit).
-		Find(&products).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return products, total, nil
-}
-
-// SearchProducts searches products by name or description
-func SearchProducts(query string, page, limit int) ([]models.Product, int64, error) {
-	var products []models.Product
-	var total int64
-
-	// Get total count
-	err := config.DB.Model(&models.Product{}).
-		Where("name ILIKE ? OR description ILIKE ?", "%"+query+"%", "%"+query+"%").
-		Count(&total).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	// Get paginated products
-	offset := (page - 1) * limit
-	err = config.DB.Preload("Category").
-		Where("name ILIKE ? OR description ILIKE ?", "%"+query+"%", "%"+query+"%").
-		Offset(offset).
-		Limit(limit).
-		Find(&products).Error
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return products, total, nil
 }
 
 // GetUserReviews retrieves reviews by user ID with pagination
