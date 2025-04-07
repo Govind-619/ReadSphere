@@ -1,37 +1,37 @@
 Admin Side:
 
-☐ Admin Sign-In
+✔ Admin Sign-In @done (4/3/2025, 3:21:03 PM)
 
 User Management:
 
-☐ Block/Unblock user (with confirmation prompt)
-☐ Backend search functionality with a cancel/clear option
-☐ Backend pagination
-☐ Table sorted in descending order (latest data first)
+✔ Block/Unblock user (with confirmation prompt) @done (4/6/2025, 7:00:44 PM)
+✔ Backend search functionality with a cancel/clear option @done (4/6/2025, 7:29:03 PM)
+✔ Backend pagination @done (4/6/2025, 7:04:44 PM)
+✔ Table sorted in descending order (latest data first) @done (4/6/2025, 7:04:48 PM)
 
 Category Management:
 
-☐ Add, Edit, and soft Delete categories
-☐ Backend search with cancel/clear option
-☐ Backend pagination
-☐ Table sorted in descending order
+✔ Add, Edit, and soft Delete categories @done (4/6/2025, 11:31:54 PM)
+✔ Backend search with cancel/clear option @done (4/6/2025, 11:39:55 PM)
+✔ Backend pagination @done (4/6/2025, 11:32:38 PM)
+✔ Table sorted in descending order @done (4/6/2025, 11:32:35 PM)
 
 Product Management:
 
-☐ Add, Edit, and soft Delete products
-☐ Multi-image upload (minimum 3 images via a single file field)
-☐ Image cropping and resizing before upload
+✔ Add, Edit, and soft Delete products @done (4/5/2025, 10:09:29 AM)
+✔ Multi-image upload (minimum 3 images via a single file field) @done (4/5/2025, 3:26:08 PM)
+✘ Image cropping and resizing before upload @cancelled (4/5/2025, 10:28:22 AM)
 
 User Side:
     
-☐ Home Page Design
+✔ Home Page Design @done (4/2/2025, 11:36:51 AM)
 
 User Authentication:
 
-☐ Sign-Up & Login with validation
-☐ OTP-based sign-up (with OTP timer and resend option)
-☐ Single Sign-On (Google, Facebook, etc.)
-☐ Forgot password functionality
+✔ Sign-Up & Login with validation @done (4/3/2025, 12:36:20 PM)
+✔ OTP-based sign-up (with OTP timer and resend option) @done (4/3/2025, 12:19:22 PM)
+✔ Single Sign-On (Google, Facebook, etc.) @done (4/3/2025, 12:19:29 PM)
+✔ Forgot password functionality @done (4/3/2025, 12:19:32 PM)
 
 Product Listing:
 
@@ -41,7 +41,7 @@ Product Listing:
 
 Product Details Page:
 
-☐ Detailed product view with image zoom
+✘ Detailed product view with image zoom @cancelled (4/5/2025, 3:26:43 PM)
 ☐ Include breadcrumbs, ratings, price, discounts, reviews, stock status, product highlights/specs, and related product recommendations
 ☐ Redirect to the product listing page if a product is blocked or unavailable (e.g., when clicking "Add to Cart")
 

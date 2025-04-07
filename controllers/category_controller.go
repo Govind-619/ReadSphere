@@ -22,29 +22,39 @@ type CategoryListRequest struct {
 
 // GetCategories handles category listing with search, pagination, and sorting
 func GetCategories(c *gin.Context) {
-	var req CategoryListRequest
+	log.Printf("GetCategories called")
+
+	// Set default values for query parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	order := c.DefaultQuery("order", "desc")
+	search := c.Query("search")
+	sortBy := c.Query("sort_by")
+
+	// Create request struct with default values
+	req := CategoryListRequest{
+		Page:   page,
+		Limit:  limit,
+		Order:  order,
+		Search: search,
+		SortBy: sortBy,
+	}
+
+	// Validate the request
 	if err := c.ShouldBindQuery(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Set defaults
-	if req.Page == 0 {
-		req.Page = 1
-	}
-	if req.Limit == 0 {
-		req.Limit = 10
-	}
-	if req.Order == "" {
-		req.Order = "desc"
-	}
-
 	query := config.DB.Model(&models.Category{})
 
-	// Apply search
+	// Apply search with improved logging
 	if req.Search != "" {
 		searchTerm := "%" + req.Search + "%"
+		log.Printf("Applying search with term: %s", req.Search)
 		query = query.Where("name ILIKE ? OR description ILIKE ?", searchTerm, searchTerm)
+	} else {
+		log.Printf("No search term provided, returning all categories")
 	}
 
 	// Apply sorting
@@ -54,7 +64,7 @@ func GetCategories(c *gin.Context) {
 	case "created_at":
 		query = query.Order(fmt.Sprintf("created_at %s", req.Order))
 	default:
-		query = query.Order("created_at desc")
+		query = query.Order(fmt.Sprintf("created_at %s", req.Order))
 	}
 
 	// Get total count
@@ -65,10 +75,22 @@ func GetCategories(c *gin.Context) {
 	offset := (req.Page - 1) * req.Limit
 	query = query.Offset(offset).Limit(req.Limit)
 
+	// Add debug logging
+	log.Printf("Query parameters - Page: %d, Limit: %d, Order: %s, SortBy: %s, Search: %s",
+		req.Page, req.Limit, req.Order, req.SortBy, req.Search)
+	log.Printf("SQL Query: %v", query.Statement.SQL.String())
+
 	var categories []models.Category
 	if err := query.Find(&categories).Error; err != nil {
+		log.Printf("Failed to fetch categories: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch categories"})
 		return
+	}
+
+	// Log the results
+	log.Printf("Found %d categories", len(categories))
+	for i, category := range categories {
+		log.Printf("Category %d: ID=%d, Name=%s, CreatedAt=%v", i+1, category.ID, category.Name, category.CreatedAt)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -78,6 +100,9 @@ func GetCategories(c *gin.Context) {
 			"page":        req.Page,
 			"limit":       req.Limit,
 			"total_pages": (total + int64(req.Limit) - 1) / int64(req.Limit),
+		},
+		"search": gin.H{
+			"term": req.Search,
 		},
 	})
 }

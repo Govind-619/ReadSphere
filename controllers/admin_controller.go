@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -103,11 +104,16 @@ type UserListRequest struct {
 
 // GetUsers handles user listing with search, pagination, and sorting
 func GetUsers(c *gin.Context) {
+	log.Printf("GetUsers called")
+
 	var req UserListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+
+	// Set default values for query parameters
+	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	req.Limit, _ = strconv.Atoi(c.DefaultQuery("limit", "10"))
+	req.SortBy = c.DefaultQuery("sort_by", "created_at")
+	req.Order = c.DefaultQuery("order", "desc")
+	req.Search = c.Query("search")
 
 	// Set defaults
 	if req.Page == 0 {
@@ -122,13 +128,16 @@ func GetUsers(c *gin.Context) {
 
 	query := config.DB.Model(&models.User{})
 
-	// Apply search
+	// Apply search with improved logging
 	if req.Search != "" {
 		searchTerm := "%" + req.Search + "%"
+		log.Printf("Applying search with term: %s", req.Search)
 		query = query.Where(
 			"email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?",
 			searchTerm, searchTerm, searchTerm,
 		)
+	} else {
+		log.Printf("No search term provided, returning all users")
 	}
 
 	// Apply sorting
@@ -140,7 +149,7 @@ func GetUsers(c *gin.Context) {
 	case "created_at":
 		query = query.Order(fmt.Sprintf("created_at %s", req.Order))
 	default:
-		query = query.Order("created_at desc")
+		query = query.Order(fmt.Sprintf("created_at %s", req.Order))
 	}
 
 	// Get total count
@@ -151,10 +160,22 @@ func GetUsers(c *gin.Context) {
 	offset := (req.Page - 1) * req.Limit
 	query = query.Offset(offset).Limit(req.Limit)
 
+	// Add debug logging
+	log.Printf("Query parameters - Page: %d, Limit: %d, Order: %s, SortBy: %s, Search: %s",
+		req.Page, req.Limit, req.Order, req.SortBy, req.Search)
+	log.Printf("SQL Query: %v", query.Statement.SQL.String())
+
 	var users []models.User
 	if err := query.Find(&users).Error; err != nil {
+		log.Printf("Failed to fetch users: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
 		return
+	}
+
+	// Log the results
+	log.Printf("Found %d users", len(users))
+	for i, user := range users {
+		log.Printf("User %d: ID=%d, Email=%s, CreatedAt=%v", i+1, user.ID, user.Email, user.CreatedAt)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -165,31 +186,72 @@ func GetUsers(c *gin.Context) {
 			"limit":       req.Limit,
 			"total_pages": (total + int64(req.Limit) - 1) / int64(req.Limit),
 		},
+		"search": gin.H{
+			"term": req.Search,
+		},
 	})
 }
 
 // BlockUser handles blocking/unblocking a user
 func BlockUser(c *gin.Context) {
-	userID := c.Param("id")
-	var user models.User
+	log.Printf("BlockUser called")
 
+	// Check if admin is in context
+	admin, exists := c.Get("admin")
+	if !exists {
+		log.Printf("Admin not found in context")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
+		return
+	}
+
+	adminModel, ok := admin.(models.Admin)
+	if !ok {
+		log.Printf("Invalid admin type in context")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
+		return
+	}
+
+	log.Printf("Admin authenticated: %s", adminModel.Email)
+
+	// Get user ID from URL parameter
+	userID := c.Param("id")
+	if userID == "" {
+		log.Printf("User ID not provided")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
+		return
+	}
+
+	log.Printf("Processing user with ID: %s", userID)
+
+	// Find the user
+	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
+		log.Printf("User not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Toggle block status
-	user.IsBlocked = !user.IsBlocked
-	if err := config.DB.Save(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
-		return
-	}
-
+	// Toggle the block status
+	newBlockStatus := !user.IsBlocked
 	action := "blocked"
-	if !user.IsBlocked {
+	if !newBlockStatus {
 		action = "unblocked"
 	}
 
+	// Update only the is_blocked field and updated_at timestamp
+	updates := map[string]interface{}{
+		"is_blocked": newBlockStatus,
+		"updated_at": time.Now(),
+	}
+
+	// Update the user
+	if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
+		log.Printf("Failed to update user block status: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user block status"})
+		return
+	}
+
+	log.Printf("User %s successfully: %s", action, user.Email)
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("User %s successfully", action),
 		"user":    user,
