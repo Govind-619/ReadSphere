@@ -50,10 +50,10 @@ func UpdateBookByField(c *gin.Context) {
 	query := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
 			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE ` + fieldName + ` = ? AND deleted_at IS NULL
 	`
@@ -190,6 +190,32 @@ func UpdateBookByField(c *gin.Context) {
 		updates["pages"] = int(pages)
 	}
 
+	if originalPrice, ok := updateData["original_price"].(float64); ok && originalPrice > 0 {
+		updates["original_price"] = originalPrice
+	}
+
+	if discountPercentage, ok := updateData["discount_percentage"].(float64); ok && discountPercentage >= 0 && discountPercentage <= 100 {
+		updates["discount_percentage"] = discountPercentage
+	}
+
+	if discountEndDate, ok := updateData["discount_end_date"].(string); ok && discountEndDate != "" {
+		parsedDate, err := time.Parse(time.RFC3339, discountEndDate)
+		if err != nil {
+			log.Printf("Invalid discount end date format: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid discount end date format"})
+			return
+		}
+		updates["discount_end_date"] = parsedDate
+	}
+
+	if language, ok := updateData["language"].(string); ok && language != "" {
+		updates["language"] = language
+	}
+
+	if format, ok := updateData["format"].(string); ok && format != "" {
+		updates["format"] = format
+	}
+
 	// Update the book with only the provided fields (excluding images which we already updated)
 	if len(updates) > 0 {
 		log.Printf("Updating book with fields: %+v", updates)
@@ -236,10 +262,10 @@ func UpdateBookByField(c *gin.Context) {
 	query = `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
 			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE id = ?
 	`

@@ -135,10 +135,10 @@ func GetBooksByCategory(categoryID uint, page, limit int) ([]models.Book, int64,
 	sqlQuery := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE category_id = ? AND deleted_at IS NULL
 		OFFSET ? LIMIT ?
@@ -180,10 +180,10 @@ func SearchBooks(query string, page, limit int) ([]models.Book, int64, error) {
 	sqlQuery := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE (name ILIKE ? OR description ILIKE ?) AND deleted_at IS NULL
 		OFFSET ? LIMIT ?

@@ -1,11 +1,13 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -14,21 +16,26 @@ import (
 
 // BookRequest represents the book creation/update request
 type BookRequest struct {
-	Name            string   `json:"name" binding:"required"`
-	Description     string   `json:"description" binding:"required"`
-	Price           float64  `json:"price" binding:"required,min=0"` // Price in local currency
-	Stock           int      `json:"stock" binding:"required,min=0"`
-	CategoryID      uint     `json:"category_id" binding:"required"`
-	GenreID         uint     `json:"genre_id" binding:"required"`
-	ImageURL        string   `json:"image_url"`
-	Images          []string `json:"images"`
-	IsActive        bool     `json:"is_active"`
-	IsFeatured      bool     `json:"is_featured"`
-	Author          string   `json:"author" binding:"required"`
-	Publisher       string   `json:"publisher" binding:"required"`
-	ISBN            string   `json:"isbn" binding:"required"`
-	PublicationYear int      `json:"publication_year" binding:"required"`
-	Pages           int      `json:"pages" binding:"required,min=1"`
+	Name               string    `json:"name" binding:"required"`
+	Description        string    `json:"description" binding:"required"`
+	Price              float64   `json:"price" binding:"required,min=0"` // Price in local currency
+	OriginalPrice      float64   `json:"original_price"`
+	DiscountPercentage int       `json:"discount_percentage"`
+	DiscountEndDate    time.Time `json:"discount_end_date"`
+	Stock              int       `json:"stock" binding:"required,min=0"`
+	CategoryID         uint      `json:"category_id" binding:"required"`
+	GenreID            uint      `json:"genre_id" binding:"required"`
+	ImageURL           string    `json:"image_url"`
+	Images             []string  `json:"images"`
+	IsActive           bool      `json:"is_active"`
+	IsFeatured         bool      `json:"is_featured"`
+	Author             string    `json:"author" binding:"required"`
+	Publisher          string    `json:"publisher" binding:"required"`
+	ISBN               string    `json:"isbn" binding:"required"`
+	PublicationYear    int       `json:"publication_year" binding:"required"`
+	Pages              int       `json:"pages" binding:"required,min=1"`
+	Language           string    `json:"language"`
+	Format             string    `json:"format"`
 }
 
 // BookListRequest represents the request parameters for listing books
@@ -96,10 +103,10 @@ func GetBooks(c *gin.Context) {
 	query := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
 			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE deleted_at IS NULL
 	`
@@ -244,12 +251,15 @@ func GetBooks(c *gin.Context) {
 
 	// Now fetch the images separately for each book
 	for i := range books {
-		var images []string
-		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
+		var imagesJSON string
+		if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", books[i].ID).Scan(&imagesJSON).Error; err != nil {
 			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
 			// Continue anyway, as we have the book data
 		} else {
-			books[i].Images = images
+			// Parse the JSON string into []string
+			if err := json.Unmarshal([]byte(imagesJSON), &books[i].Images); err != nil {
+				log.Printf("Failed to parse images JSON for book %d: %v", books[i].ID, err)
+			}
 		}
 	}
 
@@ -396,21 +406,26 @@ func CreateBook(c *gin.Context) {
 
 	// Create the book
 	book := models.Book{
-		Name:            req.Name,
-		Description:     req.Description,
-		Price:           req.Price,
-		Stock:           req.Stock,
-		CategoryID:      req.CategoryID,
-		GenreID:         req.GenreID,
-		ImageURL:        req.ImageURL,
-		Images:          req.Images,
-		IsActive:        req.IsActive,
-		IsFeatured:      req.IsFeatured,
-		Author:          req.Author,
-		Publisher:       req.Publisher,
-		ISBN:            req.ISBN,
-		PublicationYear: req.PublicationYear,
-		Pages:           req.Pages,
+		Name:               req.Name,
+		Description:        req.Description,
+		Price:              req.Price,
+		OriginalPrice:      req.OriginalPrice,
+		DiscountPercentage: req.DiscountPercentage,
+		DiscountEndDate:    req.DiscountEndDate,
+		Stock:              req.Stock,
+		CategoryID:         req.CategoryID,
+		GenreID:            req.GenreID,
+		ImageURL:           req.ImageURL,
+		Images:             req.Images,
+		IsActive:           req.IsActive,
+		IsFeatured:         req.IsFeatured,
+		Author:             req.Author,
+		Publisher:          req.Publisher,
+		ISBN:               req.ISBN,
+		PublicationYear:    req.PublicationYear,
+		Pages:              req.Pages,
+		Language:           req.Language,
+		Format:             req.Format,
 	}
 
 	if err := config.DB.Create(&book).Error; err != nil {
@@ -462,10 +477,10 @@ func UpdateBook(c *gin.Context) {
 	query := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
 			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE id = ? AND deleted_at IS NULL
 	`
@@ -502,6 +517,24 @@ func UpdateBook(c *gin.Context) {
 
 	if price, ok := updateData["price"].(float64); ok && price > 0 {
 		updates["price"] = price
+	}
+
+	if originalPrice, ok := updateData["original_price"].(float64); ok && originalPrice > 0 {
+		updates["original_price"] = originalPrice
+	}
+
+	if discountPercentage, ok := updateData["discount_percentage"].(float64); ok && discountPercentage >= 0 {
+		updates["discount_percentage"] = int(discountPercentage)
+	}
+
+	if discountEndDate, ok := updateData["discount_end_date"].(string); ok && discountEndDate != "" {
+		parsedDate, err := time.Parse(time.RFC3339, discountEndDate)
+		if err != nil {
+			log.Printf("Invalid discount end date format: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid discount end date format"})
+			return
+		}
+		updates["discount_end_date"] = parsedDate
 	}
 
 	if stock, ok := updateData["stock"].(float64); ok && stock >= 0 {
@@ -602,6 +635,14 @@ func UpdateBook(c *gin.Context) {
 		updates["pages"] = int(pages)
 	}
 
+	if language, ok := updateData["language"].(string); ok && language != "" {
+		updates["language"] = language
+	}
+
+	if format, ok := updateData["format"].(string); ok && format != "" {
+		updates["format"] = format
+	}
+
 	// Update the book with only the provided fields (excluding images which we already updated)
 	if len(updates) > 0 {
 		log.Printf("Updating book with fields: %+v", updates)
@@ -625,10 +666,10 @@ func UpdateBook(c *gin.Context) {
 	query = `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
 			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
+			isbn, publication_year, genre, pages, language, format
 		FROM books 
 		WHERE id = ?
 	`
@@ -783,24 +824,152 @@ func GetBookDetails(c *gin.Context) {
 
 	// First, fetch the book without the images field
 	var book models.Book
-	if err := config.DB.Preload("Category").First(&book, bookID).Error; err != nil {
+	query := `
+		SELECT 
+			id, created_at, updated_at, deleted_at, 
+			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
+			genre_id, image_url, is_active, is_featured, views, 
+			average_rating, total_reviews, author, publisher, 
+			isbn, publication_year, genre, pages, language, format
+		FROM books 
+		WHERE id = ? AND deleted_at IS NULL
+	`
+
+	if err := config.DB.Raw(query, bookID).Scan(&book).Error; err != nil {
 		log.Printf("Book not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found: " + err.Error()})
 		return
 	}
 
-	// Now fetch the images separately
-	var images []string
-	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", bookID).Scan(&images).Error; err != nil {
-		log.Printf("Failed to fetch images for book %s: %v", bookID, err)
-		// Continue anyway, as we have the book data
-	} else {
-		book.Images = images
+	// Check if the book is inactive or out of stock
+	if !book.IsActive {
+		log.Printf("Book is inactive: %s (ID: %s)", book.Name, bookID)
+		c.JSON(http.StatusFound, gin.H{
+			"error":        "Book is inactive. Redirected to products page.",
+			"redirect_url": "/v1/books",
+		})
+		return
 	}
+
+	if book.Stock <= 0 {
+		log.Printf("Book is out of stock: %s (ID: %s)", book.Name, bookID)
+		c.JSON(http.StatusFound, gin.H{
+			"error":        "Book is out of stock. Redirected to products page.",
+			"redirect_url": "/v1/books",
+		})
+		return
+	}
+
+	// Now fetch the images separately using array_to_json
+	var imagesJSON string
+	if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", bookID).Scan(&imagesJSON).Error; err != nil {
+		log.Printf("Failed to fetch images for book %s: %v", bookID, err)
+	} else {
+		if err := json.Unmarshal([]byte(imagesJSON), &book.Images); err != nil {
+			log.Printf("Failed to parse images JSON for book %s: %v", bookID, err)
+		}
+	}
+
+	// Load category using raw SQL
+	var category models.Category
+	if err := config.DB.Raw("SELECT * FROM categories WHERE id = ?", book.CategoryID).Scan(&category).Error; err != nil {
+		log.Printf("Failed to load category: %v", err)
+	} else {
+		book.Category = category
+	}
+
+	// Load genre using raw SQL
+	var genre models.Genre
+	if err := config.DB.Raw("SELECT * FROM genres WHERE id = ?", book.GenreID).Scan(&genre).Error; err != nil {
+		log.Printf("Failed to load genre: %v", err)
+	} else {
+		book.Genre = genre
+	}
+
+	// Create breadcrumbs
+	breadcrumbs := []gin.H{
+		{"name": "Home", "url": "/"},
+		{"name": "Books", "url": "/books"},
+		{"name": book.Category.Name, "url": fmt.Sprintf("/books?category_id=%d", book.CategoryID)},
+		{"name": book.Name, "url": ""},
+	}
+
+	// Fetch rating distribution
+	type RatingDistribution struct {
+		FiveStars  int `json:"five_stars"`
+		FourStars  int `json:"four_stars"`
+		ThreeStars int `json:"three_stars"`
+		TwoStars   int `json:"two_stars"`
+		OneStar    int `json:"one_star"`
+	}
+
+	var ratingDist RatingDistribution
+	if err := config.DB.Raw(`
+		SELECT 
+			COUNT(CASE WHEN rating = 5 THEN 1 END) as five_stars,
+			COUNT(CASE WHEN rating = 4 THEN 1 END) as four_stars,
+			COUNT(CASE WHEN rating = 3 THEN 1 END) as three_stars,
+			COUNT(CASE WHEN rating = 2 THEN 1 END) as two_stars,
+			COUNT(CASE WHEN rating = 1 THEN 1 END) as one_star
+		FROM reviews 
+		WHERE book_id = ? AND is_approved = true
+	`, bookID).Scan(&ratingDist).Error; err != nil {
+		log.Printf("Failed to fetch rating distribution: %v", err)
+	}
+
+	// Calculate discounted price
+	hasDiscount := book.DiscountPercentage > 0 && time.Now().Before(book.DiscountEndDate)
+	if hasDiscount {
+		book.Price = book.OriginalPrice * (1 - float64(book.DiscountPercentage)/100)
+	}
+
+	// Fetch recent reviews
+	var reviews []models.Review
+	if err := config.DB.Preload("User").Where("book_id = ? AND is_approved = true", bookID).Order("created_at desc").Limit(5).Find(&reviews).Error; err != nil {
+		log.Printf("Failed to fetch reviews: %v", err)
+	}
+
+	// Determine stock status
+	stockStatus := "In Stock"
+	if book.Stock <= 0 {
+		stockStatus = "Out of Stock"
+	} else if book.Stock < 5 {
+		stockStatus = "Low Stock"
+	}
+
+	// Create product specifications
+	specs := []gin.H{
+		{"key": "Author", "value": book.Author},
+		{"key": "Publisher", "value": book.Publisher},
+		{"key": "ISBN", "value": book.ISBN},
+		{"key": "Publication Year", "value": strconv.Itoa(book.PublicationYear)},
+		{"key": "Pages", "value": strconv.Itoa(book.Pages)},
+		{"key": "Language", "value": book.Language},
+		{"key": "Format", "value": book.Format},
+	}
+
+	// Fetch related books
+	var relatedBooks []models.Book
+	if err := config.DB.Where("category_id = ? AND id != ? AND is_active = true AND deleted_at IS NULL",
+		book.CategoryID, bookID).Limit(4).Find(&relatedBooks).Error; err != nil {
+		log.Printf("Failed to fetch related books: %v", err)
+	}
+
+	// Increment view count
+	config.DB.Model(&book).UpdateColumn("views", book.Views+1)
 
 	log.Printf("Book found: %s (ID: %s)", book.Name, bookID)
 	c.JSON(http.StatusOK, gin.H{
-		"book": book,
+		"book":                book,
+		"breadcrumbs":         breadcrumbs,
+		"rating_distribution": ratingDist,
+		"has_discount":        hasDiscount,
+		"discount_end_date":   book.DiscountEndDate,
+		"reviews":             reviews,
+		"total_reviews":       book.TotalReviews,
+		"stock_status":        stockStatus,
+		"specifications":      specs,
+		"related_books":       relatedBooks,
 	})
 }
 
@@ -824,12 +993,15 @@ func CheckBookExists(c *gin.Context) {
 	}
 
 	// Now fetch the images separately
-	var images []string
-	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", id).Scan(&images).Error; err != nil {
+	var imagesJSON string
+	if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", id).Scan(&imagesJSON).Error; err != nil {
 		log.Printf("Failed to fetch images for book %s: %v", id, err)
 		// Continue anyway, as we have the book data
 	} else {
-		book.Images = images
+		// Parse the JSON string into []string
+		if err := json.Unmarshal([]byte(imagesJSON), &book.Images); err != nil {
+			log.Printf("Failed to parse images JSON for book %s: %v", id, err)
+		}
 	}
 
 	log.Printf("Book found: %s (ID: %s)", book.Name, id)

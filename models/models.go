@@ -55,27 +55,32 @@ type Genre struct {
 // Book represents a book in the system
 type Book struct {
 	gorm.Model
-	Name            string   `json:"name"`
-	Description     string   `json:"description"`
-	Price           float64  `json:"price"`
-	Stock           int      `json:"stock"`
-	CategoryID      uint     `json:"category_id"`
-	Category        Category `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
-	GenreID         uint     `json:"genre_id"`
-	Genre           Genre    `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
-	ImageURL        string   `json:"image_url"`
-	Images          []string `json:"images" gorm:"type:text[]"`
-	IsActive        bool     `json:"is_active" gorm:"default:true"`
-	IsFeatured      bool     `json:"is_featured" gorm:"default:false"`
-	Views           int      `json:"views" gorm:"default:0"`
-	Reviews         []Review `json:"reviews,omitempty"`
-	AverageRating   float64  `json:"average_rating" gorm:"default:0"`
-	TotalReviews    int      `json:"total_reviews" gorm:"default:0"`
-	Author          string   `json:"author"`
-	Publisher       string   `json:"publisher"`
-	ISBN            string   `json:"isbn" gorm:"uniqueIndex"`
-	PublicationYear int      `json:"publication_year"`
-	Pages           int      `json:"pages"`
+	Name               string    `json:"name"`
+	Description        string    `json:"description"`
+	Price              float64   `json:"price"`
+	OriginalPrice      float64   `json:"original_price"`
+	DiscountPercentage int       `json:"discount_percentage"`
+	DiscountEndDate    time.Time `json:"discount_end_date"`
+	Stock              int       `json:"stock"`
+	CategoryID         uint      `json:"category_id"`
+	Category           Category  `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
+	GenreID            uint      `json:"genre_id"`
+	Genre              Genre     `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
+	ImageURL           string    `json:"image_url"`
+	Images             []string  `json:"images" gorm:"type:text[]"`
+	IsActive           bool      `json:"is_active" gorm:"default:true"`
+	IsFeatured         bool      `json:"is_featured" gorm:"default:false"`
+	Views              int       `json:"views" gorm:"default:0"`
+	Reviews            []Review  `json:"reviews,omitempty"`
+	AverageRating      float64   `json:"average_rating" gorm:"default:0"`
+	TotalReviews       int       `json:"total_reviews" gorm:"default:0"`
+	Author             string    `json:"author"`
+	Publisher          string    `json:"publisher"`
+	ISBN               string    `json:"isbn" gorm:"uniqueIndex"`
+	PublicationYear    int       `json:"publication_year"`
+	Pages              int       `json:"pages"`
+	Language           string    `json:"language" gorm:"default:'English'"`
+	Format             string    `json:"format" gorm:"default:'Paperback'"`
 }
 
 // Review represents a book review
