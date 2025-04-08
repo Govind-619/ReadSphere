@@ -44,6 +44,14 @@ type Category struct {
 	Books       []Book `json:"books,omitempty"`
 }
 
+// Genre represents a book genre
+type Genre struct {
+	gorm.Model
+	Name        string `json:"name" gorm:"uniqueIndex"`
+	Description string `json:"description"`
+	Books       []Book `json:"books,omitempty"`
+}
+
 // Book represents a book in the system
 type Book struct {
 	gorm.Model
@@ -52,7 +60,9 @@ type Book struct {
 	Price           float64  `json:"price"`
 	Stock           int      `json:"stock"`
 	CategoryID      uint     `json:"category_id"`
-	Category        Category `json:"category,omitempty"`
+	Category        Category `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
+	GenreID         uint     `json:"genre_id"`
+	Genre           Genre    `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
 	ImageURL        string   `json:"image_url"`
 	Images          []string `json:"images" gorm:"type:text[]"`
 	IsActive        bool     `json:"is_active" gorm:"default:true"`
@@ -65,7 +75,6 @@ type Book struct {
 	Publisher       string   `json:"publisher"`
 	ISBN            string   `json:"isbn" gorm:"uniqueIndex"`
 	PublicationYear int      `json:"publication_year"`
-	Genre           string   `json:"genre"`
 	Pages           int      `json:"pages"`
 }
 

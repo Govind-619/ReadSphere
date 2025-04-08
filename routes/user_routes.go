@@ -69,7 +69,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	router.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
 	// Protected routes (require authentication)
-	protected := router.Group("")
+	protected := router.Group("/user")
 	protected.Use(middleware.AuthMiddleware())
 	{
 		// Cart operations

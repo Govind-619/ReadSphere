@@ -252,3 +252,17 @@ func EnsureCategoryExists(categoryID uint) error {
 	}
 	return nil
 }
+
+// EnsureGenreExists checks if a genre exists by ID and creates it if it doesn't
+func EnsureGenreExists(genreID uint) error {
+	var genre models.Genre
+	if err := config.DB.First(&genre, genreID).Error; err != nil {
+		log.Printf("Genre %d not found, creating it", genreID)
+		genre = models.Genre{
+			Name:        fmt.Sprintf("Genre %d", genreID),
+			Description: fmt.Sprintf("Description for genre %d", genreID),
+		}
+		return config.DB.Create(&genre).Error
+	}
+	return nil
+}

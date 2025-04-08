@@ -31,6 +31,7 @@ func ConnectDatabase() {
 		&models.User{},
 		&models.Book{},
 		&models.Category{},
+		&models.Genre{},
 		&models.PasswordHistory{},
 		// Future models to be added:
 		// &models.Cart{},

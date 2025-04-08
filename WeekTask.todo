@@ -35,9 +35,9 @@ User Authentication:
 
 Product Listing:
 
-☐ Display products with backend search (with cancel/clear), pagination, and sorting options (price low-to-high, high-to-low, A-Z, Z-A; optionally, popularity, average ratings, new arrivals, featured)
-☐ Filtering options by category, price range, and optionally brand
-☐ Ensure blocked/unlisted products remain hidden
+✔ Display products with backend search (with cancel/clear), pagination, and sorting options (price low-to-high, high-to-low, A-Z, Z-A; optionally, popularity, average ratings, new arrivals, featured) @done (4/7/2025, 5:47:56 PM)
+✔ Filtering options by category, price range, and optionally brand @done (4/7/2025, 5:48:06 PM)
+✔ Ensure blocked/unlisted products remain hidden @done (4/7/2025, 6:00:16 PM)
 
 Product Details Page:
 

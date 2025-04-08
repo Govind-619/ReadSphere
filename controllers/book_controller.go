@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -15,9 +16,10 @@ import (
 type BookRequest struct {
 	Name            string   `json:"name" binding:"required"`
 	Description     string   `json:"description" binding:"required"`
-	Price           float64  `json:"price" binding:"required,min=0"` // Price in USD
+	Price           float64  `json:"price" binding:"required,min=0"` // Price in local currency
 	Stock           int      `json:"stock" binding:"required,min=0"`
 	CategoryID      uint     `json:"category_id" binding:"required"`
+	GenreID         uint     `json:"genre_id" binding:"required"`
 	ImageURL        string   `json:"image_url"`
 	Images          []string `json:"images"`
 	IsActive        bool     `json:"is_active"`
@@ -26,52 +28,218 @@ type BookRequest struct {
 	Publisher       string   `json:"publisher" binding:"required"`
 	ISBN            string   `json:"isbn" binding:"required"`
 	PublicationYear int      `json:"publication_year" binding:"required"`
-	Genre           string   `json:"genre" binding:"required"`
 	Pages           int      `json:"pages" binding:"required,min=1"`
+}
+
+// BookListRequest represents the request parameters for listing books
+type BookListRequest struct {
+	Page         int     `form:"page" binding:"min=1"`
+	Limit        int     `form:"limit" binding:"min=1,max=100"`
+	Order        string  `form:"order" binding:"oneof=asc desc"`
+	Search       string  `form:"search"`
+	SortBy       string  `form:"sort_by" binding:"oneof=name price created_at views average_rating"`
+	CategoryID   uint    `form:"category_id"`
+	GenreID      uint    `form:"genre_id"`
+	MinPrice     float64 `form:"min_price"`
+	MaxPrice     float64 `form:"max_price"`
+	IsNewArrival bool    `form:"new_arrival"`
+	IsFeatured   bool    `form:"featured"`
 }
 
 // GetBooks handles listing books with search, pagination, and sorting
 func GetBooks(c *gin.Context) {
 	log.Printf("GetBooks called")
 
-	// Use a raw SQL query to handle the text[] column properly
-	var books []models.Book
+	var req BookListRequest
+
+	// Set default values for query parameters
+	req.Page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	req.Limit, _ = strconv.Atoi(c.DefaultQuery("limit", "10"))
+	req.SortBy = c.DefaultQuery("sort_by", "created_at")
+	req.Order = c.DefaultQuery("order", "desc")
+	req.Search = c.Query("search")
+	if categoryID, err := strconv.ParseUint(c.Query("category_id"), 10, 32); err == nil {
+		req.CategoryID = uint(categoryID)
+	}
+	if genreID, err := strconv.ParseUint(c.Query("genre_id"), 10, 32); err == nil {
+		req.GenreID = uint(genreID)
+	}
+	req.IsNewArrival = c.Query("new_arrival") == "true"
+	req.IsFeatured = c.Query("featured") == "true"
+	minPrice := c.Query("min_price")
+	maxPrice := c.Query("max_price")
+
+	// Set defaults
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.Limit == 0 {
+		req.Limit = 10
+	}
+	if req.Order == "" {
+		req.Order = "desc"
+	}
+
+	// Parse price range if provided
+	if minPrice != "" {
+		if price, err := strconv.ParseFloat(minPrice, 64); err == nil {
+			req.MinPrice = price
+		}
+	}
+	if maxPrice != "" {
+		if price, err := strconv.ParseFloat(maxPrice, 64); err == nil {
+			req.MaxPrice = price
+		}
+	}
+
+	// Build the base query
 	query := `
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
 			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
 			isbn, publication_year, genre, pages
 		FROM books 
 		WHERE deleted_at IS NULL
 	`
 
-	// Apply filters
-	if categoryID := c.Query("category_id"); categoryID != "" {
-		log.Printf("Filtering by category_id: %s", categoryID)
-		query += fmt.Sprintf(" AND category_id = %s", categoryID)
-	}
-	if author := c.Query("author"); author != "" {
-		log.Printf("Filtering by author: %s", author)
-		query += fmt.Sprintf(" AND author ILIKE '%%%s%%'", author)
-	}
-	if genre := c.Query("genre"); genre != "" {
-		log.Printf("Filtering by genre: %s", genre)
-		query += fmt.Sprintf(" AND genre ILIKE '%%%s%%'", genre)
+	// Check if admin is in context - if not, only show active books
+	_, isAdmin := c.Get("admin")
+	if !isAdmin {
+		query += " AND is_active = true"
 	}
 
-	// Apply sorting
-	sortBy := c.DefaultQuery("sort_by", "created_at")
-	order := c.DefaultQuery("order", "desc")
-	log.Printf("Sorting by: %s %s", sortBy, order)
-	query += fmt.Sprintf(" ORDER BY %s %s", sortBy, order)
+	// Add category filter if provided
+	if req.CategoryID > 0 {
+		log.Printf("Filtering by category_id: %d", req.CategoryID)
+		query += fmt.Sprintf(" AND category_id = %d", req.CategoryID)
+	}
+
+	// Add genre filter if provided
+	if req.GenreID > 0 {
+		log.Printf("Filtering by genre_id: %d", req.GenreID)
+		query += fmt.Sprintf(" AND genre_id = %d", req.GenreID)
+	}
+
+	// Add price range filters if provided
+	if req.MinPrice > 0 {
+		log.Printf("Filtering by min_price: %f", req.MinPrice)
+		query += fmt.Sprintf(" AND price >= %f", req.MinPrice)
+	}
+	if req.MaxPrice > 0 {
+		log.Printf("Filtering by max_price: %f", req.MaxPrice)
+		query += fmt.Sprintf(" AND price <= %f", req.MaxPrice)
+	}
+
+	// Add search filter if provided
+	if req.Search != "" {
+		searchTerm := "%" + req.Search + "%"
+		log.Printf("Filtering by search term: %s", req.Search)
+		query += fmt.Sprintf(" AND (name ILIKE '%s' OR description ILIKE '%s' OR author ILIKE '%s' OR publisher ILIKE '%s' OR isbn ILIKE '%s')",
+			searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+	}
+
+	// Add new arrival filter if requested
+	if req.IsNewArrival {
+		log.Printf("Filtering by new arrival")
+		query += " AND created_at >= NOW() - INTERVAL '30 days'"
+	}
+
+	// Add featured filter if requested
+	if req.IsFeatured {
+		log.Printf("Filtering by featured")
+		query += " AND is_featured = true"
+	}
+
+	// Get total count for pagination
+	countQuery := `
+		SELECT COUNT(*)
+		FROM books 
+		WHERE deleted_at IS NULL
+	`
+
+	// Check if admin is in context - if not, only count active books
+	_, isAdmin = c.Get("admin")
+	if !isAdmin {
+		countQuery += " AND is_active = true"
+	}
+
+	// Add category filter if provided
+	if req.CategoryID > 0 {
+		countQuery += fmt.Sprintf(" AND category_id = %d", req.CategoryID)
+	}
+
+	// Add genre filter if provided
+	if req.GenreID > 0 {
+		countQuery += fmt.Sprintf(" AND genre_id = %d", req.GenreID)
+	}
+
+	// Add price range filters if provided
+	if req.MinPrice > 0 {
+		countQuery += fmt.Sprintf(" AND price >= %f", req.MinPrice)
+	}
+	if req.MaxPrice > 0 {
+		countQuery += fmt.Sprintf(" AND price <= %f", req.MaxPrice)
+	}
+
+	// Add search filter if provided
+	if req.Search != "" {
+		searchTerm := "%" + req.Search + "%"
+		countQuery += fmt.Sprintf(" AND (name ILIKE '%s' OR description ILIKE '%s' OR author ILIKE '%s' OR publisher ILIKE '%s' OR isbn ILIKE '%s')",
+			searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+	}
+
+	// Add new arrival filter if requested
+	if req.IsNewArrival {
+		countQuery += " AND created_at >= NOW() - INTERVAL '30 days'"
+	}
+
+	// Add featured filter if requested
+	if req.IsFeatured {
+		countQuery += " AND is_featured = true"
+	}
+
+	var total int64
+	if err := config.DB.Raw(countQuery).Scan(&total).Error; err != nil {
+		log.Printf("Failed to count books: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count books"})
+		return
+	}
+
+	// Add sorting
+	switch req.SortBy {
+	case "name":
+		query += fmt.Sprintf(" ORDER BY name %s", req.Order)
+	case "price":
+		query += fmt.Sprintf(" ORDER BY price %s", req.Order)
+	case "created_at":
+		query += fmt.Sprintf(" ORDER BY created_at %s", req.Order)
+	case "views":
+		query += fmt.Sprintf(" ORDER BY views %s", req.Order)
+	case "average_rating":
+		query += fmt.Sprintf(" ORDER BY average_rating %s", req.Order)
+	default:
+		query += fmt.Sprintf(" ORDER BY created_at %s", req.Order)
+	}
+
+	// Add pagination
+	offset := (req.Page - 1) * req.Limit
+	query += fmt.Sprintf(" LIMIT %d OFFSET %d", req.Limit, offset)
 
 	// Execute the query
+	var books []models.Book
 	if err := config.DB.Raw(query).Scan(&books).Error; err != nil {
 		log.Printf("Failed to fetch books: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
 		return
+	}
+
+	// Log the results
+	log.Printf("Found %d books", len(books))
+	for i, book := range books {
+		log.Printf("Book %d: ID=%d, Name=%s, Price=%f, CreatedAt=%v",
+			i+1, book.ID, book.Name, book.Price, book.CreatedAt)
 	}
 
 	// Now fetch the images separately for each book
@@ -85,10 +253,68 @@ func GetBooks(c *gin.Context) {
 		}
 	}
 
-	log.Printf("Successfully fetched %d books", len(books))
+	// Load category and genre information for each book
+	for i := range books {
+		// Load category
+		if books[i].CategoryID > 0 {
+			var category models.Category
+			if err := config.DB.First(&category, books[i].CategoryID).Error; err != nil {
+				log.Printf("Failed to fetch category for book %d: %v", books[i].ID, err)
+			} else {
+				books[i].Category = category
+			}
+		}
+
+		// Load genre
+		if books[i].GenreID > 0 {
+			var genre models.Genre
+			if err := config.DB.First(&genre, books[i].GenreID).Error; err != nil {
+				log.Printf("Failed to fetch genre for book %d: %v", books[i].ID, err)
+			} else {
+				books[i].Genre = genre
+			}
+		}
+	}
+
+	// Get categories for filtering
+	var categories []models.Category
+	if err := config.DB.Find(&categories).Error; err != nil {
+		log.Printf("Failed to fetch categories: %v", err)
+		// Continue anyway, as we have the books data
+	}
+
+	// Get genres for filtering
+	var genres []models.Genre
+	if err := config.DB.Find(&genres).Error; err != nil {
+		log.Printf("Failed to fetch genres: %v", err)
+		// Continue anyway, as we have the books data
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"books": books,
-		"note":  "Prices are in Indian Rupees (INR)",
+		"pagination": gin.H{
+			"total":       total,
+			"page":        req.Page,
+			"limit":       req.Limit,
+			"total_pages": (total + int64(req.Limit) - 1) / int64(req.Limit),
+		},
+		"filters": gin.H{
+			"search":      req.Search,
+			"category_id": req.CategoryID,
+			"genre_id":    req.GenreID,
+			"min_price":   req.MinPrice,
+			"max_price":   req.MaxPrice,
+			"new_arrival": req.IsNewArrival,
+			"featured":    req.IsFeatured,
+		},
+		"sort": gin.H{
+			"by":    req.SortBy,
+			"order": req.Order,
+		},
+		"available_filters": gin.H{
+			"categories": categories,
+			"genres":     genres,
+		},
 	})
 }
 
@@ -154,131 +380,49 @@ func CreateBook(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Book request: %+v", req)
-
-	// Validate image URLs
-	if err := validateImageURLs(req.Images); err != nil {
-		log.Printf("Invalid image URLs: %v", err)
+	// Check if category exists
+	if err := EnsureCategoryExists(req.CategoryID); err != nil {
+		log.Printf("Category validation failed: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Ensure category exists
-	if err := EnsureCategoryExists(req.CategoryID); err != nil {
-		log.Printf("Failed to ensure category exists: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to ensure category exists"})
+	// Check if genre exists
+	if err := EnsureGenreExists(req.GenreID); err != nil {
+		log.Printf("Genre validation failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Check if ISBN already exists in an active book
-	var existingBook models.Book
-	if err := config.DB.Where("isbn = ? AND deleted_at IS NULL", req.ISBN).First(&existingBook).Error; err == nil {
-		log.Printf("ISBN already exists in an active book: %s", req.ISBN)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
-		return
-	}
-
-	// Convert price from USD to INR (using approximate conversion rate of 1 USD = 83 INR)
-	priceInINR := req.Price * 83
-
-	// Create the book without the images field first
+	// Create the book
 	book := models.Book{
 		Name:            req.Name,
 		Description:     req.Description,
-		Price:           priceInINR, // Store price in INR
+		Price:           req.Price,
 		Stock:           req.Stock,
 		CategoryID:      req.CategoryID,
+		GenreID:         req.GenreID,
 		ImageURL:        req.ImageURL,
+		Images:          req.Images,
 		IsActive:        req.IsActive,
 		IsFeatured:      req.IsFeatured,
 		Author:          req.Author,
 		Publisher:       req.Publisher,
 		ISBN:            req.ISBN,
 		PublicationYear: req.PublicationYear,
-		Genre:           req.Genre,
 		Pages:           req.Pages,
 	}
 
-	// Create the book without the images field
 	if err := config.DB.Create(&book).Error; err != nil {
 		log.Printf("Failed to create book: %v", err)
-
-		// Check for specific database errors
-		if strings.Contains(err.Error(), "foreign key") {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
-			return
-		}
-
-		// Check for unique constraint violation (ISBN)
-		if strings.Contains(err.Error(), "unique constraint") || strings.Contains(err.Error(), "duplicate key") {
-			log.Printf("ISBN already exists: %s", req.ISBN)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
-			return
-		}
-
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book"})
 		return
 	}
 
-	log.Printf("Book created with ID: %d", book.ID)
-
-	// Now update the images field using a raw SQL query with proper PostgreSQL array syntax
-	if len(req.Images) > 0 {
-		// Format the array for PostgreSQL
-		imagesArray := "ARRAY["
-		for i, img := range req.Images {
-			if i > 0 {
-				imagesArray += ", "
-			}
-			imagesArray += fmt.Sprintf("'%s'", strings.ReplaceAll(img, "'", "''"))
-		}
-		imagesArray += "]::text[]"
-
-		// Update the images field
-		if err := config.DB.Exec("UPDATE books SET images = "+imagesArray+" WHERE id = ?", book.ID).Error; err != nil {
-			log.Printf("Failed to update images: %v", err)
-			// Continue anyway, as the book was created successfully
-		}
-	}
-
-	// Fetch the updated book with explicit error handling
-	var updatedBook models.Book
-	query := `
-		SELECT 
-			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
-			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
-		FROM books 
-		WHERE id = ?
-	`
-
-	if err := config.DB.Raw(query, book.ID).Scan(&updatedBook).Error; err != nil {
-		log.Printf("Failed to fetch updated book: %v", err)
-		// Return the book we created, even if we couldn't fetch the updated version
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "Book created successfully, but failed to fetch updated version",
-			"book":    book,
-			"note":    "Price is in Indian Rupees (INR)",
-		})
-		return
-	}
-
-	// Now fetch the images separately
-	var images []string
-	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", book.ID).Scan(&images).Error; err != nil {
-		log.Printf("Failed to fetch images for book %d: %v", book.ID, err)
-		// Continue anyway, as we have the book data
-	} else {
-		updatedBook.Images = images
-	}
-
-	log.Printf("Book created successfully: %s", updatedBook.Name)
+	log.Printf("Book created successfully: %s", book.Name)
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Book created successfully",
-		"book":    updatedBook,
-		"note":    "Price is in Indian Rupees (INR)",
+		"book":    book,
 	})
 }
 
@@ -319,7 +463,7 @@ func UpdateBook(c *gin.Context) {
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
 			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
 			isbn, publication_year, genre, pages
 		FROM books 
@@ -357,8 +501,7 @@ func UpdateBook(c *gin.Context) {
 	}
 
 	if price, ok := updateData["price"].(float64); ok && price > 0 {
-		// Convert price from USD to INR (using approximate conversion rate of 1 USD = 83 INR)
-		updates["price"] = price * 83
+		updates["price"] = price
 	}
 
 	if stock, ok := updateData["stock"].(float64); ok && stock >= 0 {
@@ -445,8 +588,14 @@ func UpdateBook(c *gin.Context) {
 		updates["publication_year"] = int(publicationYear)
 	}
 
-	if genre, ok := updateData["genre"].(string); ok && genre != "" {
-		updates["genre"] = genre
+	if genreID, ok := updateData["genre_id"].(float64); ok && genreID > 0 {
+		// Ensure genre exists
+		if err := EnsureGenreExists(uint(genreID)); err != nil {
+			log.Printf("Failed to ensure genre exists: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to ensure genre exists"})
+			return
+		}
+		updates["genre_id"] = uint(genreID)
 	}
 
 	if pages, ok := updateData["pages"].(float64); ok && pages > 0 {
@@ -477,7 +626,7 @@ func UpdateBook(c *gin.Context) {
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
 			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
 			isbn, publication_year, genre, pages
 		FROM books 
@@ -490,7 +639,6 @@ func UpdateBook(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Book updated successfully, but failed to fetch updated version",
 			"book":    book,
-			"note":    "Price is in Indian Rupees (INR)",
 		})
 		return
 	}
@@ -508,7 +656,6 @@ func UpdateBook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Book updated successfully",
 		"book":    updatedBook,
-		"note":    "Price is in Indian Rupees (INR)",
 	})
 }
 
@@ -654,7 +801,6 @@ func GetBookDetails(c *gin.Context) {
 	log.Printf("Book found: %s (ID: %s)", book.Name, bookID)
 	c.JSON(http.StatusOK, gin.H{
 		"book": book,
-		"note": "Price is in Indian Rupees (INR)",
 	})
 }
 

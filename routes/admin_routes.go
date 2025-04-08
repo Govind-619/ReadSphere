@@ -48,6 +48,13 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.GET("/books/:id/reviews", controllers.GetBookReviews)
 			admin.PUT("/books/:id/reviews/:reviewId/approve", controllers.ApproveReview)
 			admin.DELETE("/books/:id/reviews/:reviewId", controllers.DeleteReview)
+
+			// Genre management routes
+			admin.POST("/genres", controllers.CreateGenre)
+			admin.PUT("/genres/:id", controllers.UpdateGenre)
+			admin.DELETE("/genres/:id", controllers.DeleteGenre)
+			admin.GET("/genres", controllers.GetGenres)
+			admin.GET("/genres/:id", controllers.ListBooksByGenre)
 		}
 	}
 }

@@ -51,7 +51,7 @@ func UpdateBookByField(c *gin.Context) {
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
 			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
 			isbn, publication_year, genre, pages
 		FROM books 
@@ -89,8 +89,7 @@ func UpdateBookByField(c *gin.Context) {
 	}
 
 	if price, ok := updateData["price"].(float64); ok && price > 0 {
-		// Convert price from USD to INR (using approximate conversion rate of 1 USD = 83 INR)
-		updates["price"] = price * 83
+		updates["price"] = price
 	}
 
 	if stock, ok := updateData["stock"].(float64); ok && stock >= 0 {
@@ -177,8 +176,14 @@ func UpdateBookByField(c *gin.Context) {
 		updates["publication_year"] = int(publicationYear)
 	}
 
-	if genre, ok := updateData["genre"].(string); ok && genre != "" {
-		updates["genre"] = genre
+	if genreID, ok := updateData["genre_id"].(float64); ok && genreID > 0 {
+		// Ensure genre exists
+		if err := EnsureGenreExists(uint(genreID)); err != nil {
+			log.Printf("Failed to ensure genre exists: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to ensure genre exists"})
+			return
+		}
+		updates["genre_id"] = uint(genreID)
 	}
 
 	if pages, ok := updateData["pages"].(float64); ok && pages > 0 {
@@ -232,7 +237,7 @@ func UpdateBookByField(c *gin.Context) {
 		SELECT 
 			id, created_at, updated_at, deleted_at, 
 			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
+			genre_id, image_url, is_active, is_featured, views, 
 			average_rating, total_reviews, author, publisher, 
 			isbn, publication_year, genre, pages
 		FROM books 
