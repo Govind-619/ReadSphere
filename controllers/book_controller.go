@@ -53,6 +53,16 @@ type BookListRequest struct {
 	IsFeatured   bool    `form:"featured"`
 }
 
+// BookListItem represents a minimal book item for list view
+type BookListItem struct {
+	ID       uint    `json:"id"`
+	Name     string  `json:"name"`
+	Author   string  `json:"author"`
+	Price    float64 `json:"price"`
+	ImageURL string  `json:"image_url"`
+	IsActive bool    `json:"is_active"`
+}
+
 // GetBooks handles listing books with search, pagination, and sorting
 func GetBooks(c *gin.Context) {
 	log.Printf("GetBooks called")
@@ -99,14 +109,10 @@ func GetBooks(c *gin.Context) {
 		}
 	}
 
-	// Build the base query
+	// Build the base query with only essential fields
 	query := `
 		SELECT 
-			id, created_at, updated_at, deleted_at, 
-			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
-			genre_id, image_url, is_active, is_featured, views, 
-			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages, language, format
+			id, name, author, price, image_url, is_active
 		FROM books 
 		WHERE deleted_at IS NULL
 	`
@@ -143,8 +149,8 @@ func GetBooks(c *gin.Context) {
 	if req.Search != "" {
 		searchTerm := "%" + req.Search + "%"
 		log.Printf("Filtering by search term: %s", req.Search)
-		query += fmt.Sprintf(" AND (name ILIKE '%s' OR description ILIKE '%s' OR author ILIKE '%s' OR publisher ILIKE '%s' OR isbn ILIKE '%s')",
-			searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+		query += fmt.Sprintf(" AND (name ILIKE '%s' OR author ILIKE '%s')",
+			searchTerm, searchTerm)
 	}
 
 	// Add new arrival filter if requested
@@ -193,8 +199,8 @@ func GetBooks(c *gin.Context) {
 	// Add search filter if provided
 	if req.Search != "" {
 		searchTerm := "%" + req.Search + "%"
-		countQuery += fmt.Sprintf(" AND (name ILIKE '%s' OR description ILIKE '%s' OR author ILIKE '%s' OR publisher ILIKE '%s' OR isbn ILIKE '%s')",
-			searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+		countQuery += fmt.Sprintf(" AND (name ILIKE '%s' OR author ILIKE '%s')",
+			searchTerm, searchTerm)
 	}
 
 	// Add new arrival filter if requested
@@ -235,67 +241,35 @@ func GetBooks(c *gin.Context) {
 	query += fmt.Sprintf(" LIMIT %d OFFSET %d", req.Limit, offset)
 
 	// Execute the query
-	var books []models.Book
+	var books []BookListItem
 	if err := config.DB.Raw(query).Scan(&books).Error; err != nil {
 		log.Printf("Failed to fetch books: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
 		return
 	}
 
-	// Log the results
-	log.Printf("Found %d books", len(books))
-	for i, book := range books {
-		log.Printf("Book %d: ID=%d, Name=%s, Price=%f, CreatedAt=%v",
-			i+1, book.ID, book.Name, book.Price, book.CreatedAt)
+	// Get categories for filtering with only essential fields
+	type SimpleCategory struct {
+		ID          uint   `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
 	}
 
-	// Now fetch the images separately for each book
-	for i := range books {
-		var imagesJSON string
-		if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", books[i].ID).Scan(&imagesJSON).Error; err != nil {
-			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
-			// Continue anyway, as we have the book data
-		} else {
-			// Parse the JSON string into []string
-			if err := json.Unmarshal([]byte(imagesJSON), &books[i].Images); err != nil {
-				log.Printf("Failed to parse images JSON for book %d: %v", books[i].ID, err)
-			}
-		}
-	}
-
-	// Load category and genre information for each book
-	for i := range books {
-		// Load category
-		if books[i].CategoryID > 0 {
-			var category models.Category
-			if err := config.DB.First(&category, books[i].CategoryID).Error; err != nil {
-				log.Printf("Failed to fetch category for book %d: %v", books[i].ID, err)
-			} else {
-				books[i].Category = category
-			}
-		}
-
-		// Load genre
-		if books[i].GenreID > 0 {
-			var genre models.Genre
-			if err := config.DB.First(&genre, books[i].GenreID).Error; err != nil {
-				log.Printf("Failed to fetch genre for book %d: %v", books[i].ID, err)
-			} else {
-				books[i].Genre = genre
-			}
-		}
-	}
-
-	// Get categories for filtering
-	var categories []models.Category
-	if err := config.DB.Find(&categories).Error; err != nil {
+	var categories []SimpleCategory
+	if err := config.DB.Raw("SELECT id, name, description FROM categories").Scan(&categories).Error; err != nil {
 		log.Printf("Failed to fetch categories: %v", err)
 		// Continue anyway, as we have the books data
 	}
 
-	// Get genres for filtering
-	var genres []models.Genre
-	if err := config.DB.Find(&genres).Error; err != nil {
+	// Get genres for filtering with only essential fields
+	type SimpleGenre struct {
+		ID          uint   `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	var genres []SimpleGenre
+	if err := config.DB.Raw("SELECT id, name, description FROM genres").Scan(&genres).Error; err != nil {
 		log.Printf("Failed to fetch genres: %v", err)
 		// Continue anyway, as we have the books data
 	}
@@ -309,13 +283,8 @@ func GetBooks(c *gin.Context) {
 			"total_pages": (total + int64(req.Limit) - 1) / int64(req.Limit),
 		},
 		"filters": gin.H{
-			"search":      req.Search,
 			"category_id": req.CategoryID,
 			"genre_id":    req.GenreID,
-			"min_price":   req.MinPrice,
-			"max_price":   req.MaxPrice,
-			"new_arrival": req.IsNewArrival,
-			"featured":    req.IsFeatured,
 		},
 		"sort": gin.H{
 			"by":    req.SortBy,
@@ -841,20 +810,11 @@ func GetBookDetails(c *gin.Context) {
 		return
 	}
 
-	// Check if the book is inactive or out of stock
+	// Check if the book is inactive
 	if !book.IsActive {
 		log.Printf("Book is inactive: %s (ID: %s)", book.Name, bookID)
 		c.JSON(http.StatusFound, gin.H{
 			"error":        "Book is inactive. Redirected to products page.",
-			"redirect_url": "/v1/books",
-		})
-		return
-	}
-
-	if book.Stock <= 0 {
-		log.Printf("Book is out of stock: %s (ID: %s)", book.Name, bookID)
-		c.JSON(http.StatusFound, gin.H{
-			"error":        "Book is out of stock. Redirected to products page.",
 			"redirect_url": "/v1/books",
 		})
 		return
@@ -929,12 +889,17 @@ func GetBookDetails(c *gin.Context) {
 		log.Printf("Failed to fetch reviews: %v", err)
 	}
 
-	// Determine stock status
-	stockStatus := "In Stock"
+	// Determine stock status and message
+	var stockStatus, stockMessage string
 	if book.Stock <= 0 {
 		stockStatus = "Out of Stock"
+		stockMessage = "This book is currently out of stock. Please check back later."
 	} else if book.Stock < 5 {
 		stockStatus = "Low Stock"
+		stockMessage = fmt.Sprintf("Only %d copies left in stock!", book.Stock)
+	} else {
+		stockStatus = "In Stock"
+		stockMessage = fmt.Sprintf("%d copies available", book.Stock)
 	}
 
 	// Create product specifications
@@ -958,8 +923,11 @@ func GetBookDetails(c *gin.Context) {
 	// Increment view count
 	config.DB.Model(&book).UpdateColumn("views", book.Views+1)
 
-	log.Printf("Book found: %s (ID: %s)", book.Name, bookID)
-	c.JSON(http.StatusOK, gin.H{
+	// Check if user is admin
+	_, isAdmin := c.Get("admin")
+
+	// Create response based on user role
+	response := gin.H{
 		"book":                book,
 		"breadcrumbs":         breadcrumbs,
 		"rating_distribution": ratingDist,
@@ -968,9 +936,59 @@ func GetBookDetails(c *gin.Context) {
 		"reviews":             reviews,
 		"total_reviews":       book.TotalReviews,
 		"stock_status":        stockStatus,
+		"stock_message":       stockMessage,
 		"specifications":      specs,
 		"related_books":       relatedBooks,
-	})
+	}
+
+	// If not admin, remove sensitive fields
+	if !isAdmin {
+		// Create a simplified book response without sensitive fields
+		simplifiedBook := gin.H{
+			"id":               book.ID,
+			"name":             book.Name,
+			"description":      book.Description,
+			"price":            book.Price,
+			"image_url":        book.ImageURL,
+			"images":           book.Images,
+			"author":           book.Author,
+			"publisher":        book.Publisher,
+			"isbn":             book.ISBN,
+			"publication_year": book.PublicationYear,
+			"pages":            book.Pages,
+			"language":         book.Language,
+			"format":           book.Format,
+			"stock":            book.Stock,
+			"category": gin.H{
+				"id":          book.Category.ID,
+				"name":        book.Category.Name,
+				"description": book.Category.Description,
+			},
+			"genre": gin.H{
+				"id":          book.Genre.ID,
+				"name":        book.Genre.Name,
+				"description": book.Genre.Description,
+			},
+		}
+		response["book"] = simplifiedBook
+
+		// Simplify related books
+		var simplifiedRelatedBooks []gin.H
+		for _, rb := range relatedBooks {
+			simplifiedRelatedBooks = append(simplifiedRelatedBooks, gin.H{
+				"id":          rb.ID,
+				"name":        rb.Name,
+				"description": rb.Description,
+				"price":       rb.Price,
+				"image_url":   rb.ImageURL,
+				"author":      rb.Author,
+			})
+		}
+		response["related_books"] = simplifiedRelatedBooks
+	}
+
+	log.Printf("Book found: %s (ID: %s)", book.Name, bookID)
+	c.JSON(http.StatusOK, response)
 }
 
 // CheckBookExists checks if a book exists by ID

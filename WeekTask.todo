@@ -42,6 +42,6 @@ Product Listing:
 Product Details Page:
 
 ✘ Detailed product view with image zoom @cancelled (4/5/2025, 3:26:43 PM)
-☐ Include breadcrumbs, ratings, price, discounts, reviews, stock status, product highlights/specs, and related product recommendations
-☐ Redirect to the product listing page if a product is blocked or unavailable (e.g., when clicking "Add to Cart")
+✔ Include breadcrumbs, ratings, price, discounts, reviews, stock status, product highlights/specs, and related product recommendations @done (4/8/2025, 2:37:17 PM)
+✔ Redirect to the product listing page if a product is blocked or unavailable (e.g., when clicking "Add to Cart") @done (4/8/2025, 5:47:33 PM)
 

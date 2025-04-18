@@ -50,6 +50,9 @@ func SetupRouter() *gin.Engine {
 
 		// Initialize admin routes
 		initAdminRoutes(api)
+
+		// Initialize user profile routes
+		SetupUserProfileRoutes(router)
 	}
 
 	return router

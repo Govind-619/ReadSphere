@@ -42,104 +42,178 @@ type RegistrationData struct {
 
 // RegisterUser handles user registration
 func RegisterUser(c *gin.Context) {
-	var req RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please fill all the fields"})
+	var user models.User
+	if err := c.ShouldBindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid request format",
+			"details": "Please check your input data and ensure all required fields are provided correctly.",
+		})
 		return
 	}
 
 	// Validate username
-	if valid, msg := utils.ValidateUsername(req.Username); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+	if valid, msg := utils.ValidateUsername(user.Username); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid username",
+			"details": msg,
+		})
 		return
 	}
 
 	// Validate email
-	if valid, msg := utils.ValidateEmail(req.Email); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+	if valid, msg := utils.ValidateEmail(user.Email); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid email",
+			"details": msg,
+		})
 		return
 	}
 
 	// Validate password
-	if valid, msg := utils.ValidatePassword(req.Password); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		return
-	}
-
-	// Validate confirm password
-	if valid, msg := utils.ValidateConfirmPassword(req.Password, req.ConfirmPassword); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+	if valid, msg := utils.ValidatePassword(user.Password); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Invalid password",
+			"details": msg,
+		})
 		return
 	}
 
 	// Validate first name if provided
-	if valid, msg := utils.ValidateName(req.FirstName); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		return
+	if user.FirstName != "" {
+		if valid, msg := utils.ValidateName(user.FirstName); !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
 	}
 
 	// Validate last name if provided
-	if valid, msg := utils.ValidateName(req.LastName); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
-		return
+	if user.LastName != "" {
+		if valid, msg := utils.ValidateName(user.LastName); !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
 	}
 
 	// Validate phone if provided
-	if valid, msg := utils.ValidatePhone(req.Phone); !valid {
+	if user.Phone != "" {
+		if valid, msg := utils.ValidatePhone(user.Phone); !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+	}
+
+	// Check for SQL injection in all fields
+	if valid, msg := utils.ValidateSQLInjection(user.Username); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateSQLInjection(user.Email); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateSQLInjection(user.FirstName); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateSQLInjection(user.LastName); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateSQLInjection(user.Phone); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
 
-	// Check if user already exists
+	// Check for XSS in all fields
+	if valid, msg := utils.ValidateXSS(user.Username); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateXSS(user.Email); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateXSS(user.FirstName); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateXSS(user.LastName); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+	if valid, msg := utils.ValidateXSS(user.Phone); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+
+	// Check if username already exists
 	var existingUser models.User
-	if err := config.DB.Where("username = ? OR email = ?", req.Username, req.Email).First(&existingUser).Error; err == nil {
-		if existingUser.Username == req.Username {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Username already taken"})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already registered"})
+	if err := config.DB.Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "Username already exists",
+			"details": "The username you've chosen is already taken. Please choose a different username.",
+		})
+		return
+	}
+
+	// Check if email already exists
+	if err := config.DB.Where("email = ?", user.Email).First(&existingUser).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   "Email already exists",
+			"details": "An account with this email address already exists. Please use a different email or try logging in.",
+		})
 		return
 	}
 
 	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to process password",
+			"details": "An error occurred while securing your password. Please try again later.",
+		})
+		return
+	}
+	user.Password = string(hashedPassword)
+
+	// Create user
+	if err := config.DB.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to create user account",
+			"details": "An error occurred while creating your account. Please try again later.",
+		})
 		return
 	}
 
 	// Generate OTP
 	otp := generateOTP()
+	otpExpiry := time.Now().Add(15 * time.Minute)
 
-	log.Println(otp)
-
-	// Store registration data in session
-	session := sessions.Default(c)
-	session.Set("email", req.Email)
-	session.Set("password", string(hashedPassword))
-	session.Set("otp", otp)
-	session.Set("otp_expires", time.Now().Add(time.Minute*1).Unix())
-	session.Set("username", req.Username)
-	session.Set("first_name", req.FirstName)
-	session.Set("last_name", req.LastName)
-	session.Set("phone", req.Phone)
-
-	if err := session.Save(); err != nil {
-		log.Printf("Session save error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
+	// Store OTP
+	if err := config.DB.Create(&models.UserOTP{
+		UserID:    user.ID,
+		Code:      otp,
+		ExpiresAt: otpExpiry,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to generate verification code",
+			"details": "An error occurred while generating your verification code. Please try again later.",
+		})
 		return
 	}
 
-	// Send OTP via email
-	if err := utils.SendOTP(req.Email, otp); err != nil {
-		log.Printf("Email error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+	// Send OTP email
+	if err := utils.SendOTP(user.Email, otp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to send verification email",
+			"details": "An error occurred while sending your verification email. Please try again later.",
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Please verify your email with the OTP sent.",
-		"email":   req.Email,
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "User registered successfully. Please check your email for verification code.",
+		"user_id": user.ID,
 	})
 }
 
@@ -149,6 +223,7 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+// LoginUser handles user login
 func LoginUser(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -156,8 +231,23 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 
+	// Sanitize input
+	req.Email = utils.SanitizeString(req.Email)
+
 	// Validate email
 	if valid, msg := utils.ValidateEmail(req.Email); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+
+	// Check for SQL injection
+	if valid, msg := utils.ValidateSQLInjection(req.Email); !valid {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		return
+	}
+
+	// Check for XSS
+	if valid, msg := utils.ValidateXSS(req.Email); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
@@ -197,13 +287,6 @@ func LoginUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": tokenString,
-		"user": gin.H{
-			"id":        user.Model.ID,
-			"username":  user.Username,
-			"email":     user.Email,
-			"firstName": user.FirstName,
-			"lastName":  user.LastName,
-		},
 	})
 }
 
@@ -285,17 +368,27 @@ func VerifyOTP(c *gin.Context) {
 		return
 	}
 
+	// Generate JWT token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.Model.ID,
+		"email":   user.Email,
+		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		log.Printf("Token generation error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
 	// Clear session after successful verification
 	session.Clear()
 	session.Save()
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Email verified and registration completed successfully",
-		"user": gin.H{
-			"id":       user.Model.ID,
-			"username": user.Username,
-			"email":    user.Email,
-		},
+		"token":   tokenString,
 	})
 }
 

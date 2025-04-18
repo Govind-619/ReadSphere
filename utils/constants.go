@@ -72,31 +72,31 @@ const (
 // Error messages
 const (
 	// Authentication errors
-	ErrInvalidCredentials = "Invalid email or password"
-	ErrUserBlocked        = "Your account has been blocked"
-	ErrInvalidToken       = "Invalid or expired token"
-	ErrUnauthorized       = "Unauthorized access"
-	ErrForbidden          = "Access forbidden"
+	ErrInvalidCredentials = "Invalid email or password. Please check your credentials and try again."
+	ErrUserBlocked        = "Your account has been blocked. Please contact support for assistance."
+	ErrInvalidToken       = "Your session has expired. Please log in again."
+	ErrUnauthorized       = "You are not authorized to perform this action. Please log in with appropriate credentials."
+	ErrForbidden          = "Access forbidden. You don't have permission to perform this action."
 
 	// Validation errors
-	ErrInvalidEmail      = "Invalid email format"
-	ErrInvalidPassword   = "Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character"
-	ErrInvalidPhone      = "Invalid phone number format"
-	ErrInvalidPrice      = "Price must be greater than 0"
-	ErrInvalidStock      = "Stock cannot be negative"
-	ErrInvalidRating     = "Rating must be between 1 and 5"
-	ErrInvalidFileType   = "Invalid file type. Allowed types: jpg, jpeg, png, gif"
-	ErrFileTooLarge      = "File size exceeds 5MB limit"
-	ErrInvalidPagination = "Invalid pagination parameters"
+	ErrInvalidEmail      = "Invalid email format. Please enter a valid email address (e.g., user@example.com)."
+	ErrInvalidPassword   = "Password must meet the following requirements:\n- At least 8 characters long\n- At least one uppercase letter\n- At least one lowercase letter\n- At least one number\n- At least one special character (@$!%*?&)"
+	ErrInvalidPhone      = "Invalid phone number format. Please enter a valid phone number (e.g., +1234567890)."
+	ErrInvalidPrice      = "Price must be greater than 0. Please enter a valid price."
+	ErrInvalidStock      = "Stock quantity cannot be negative. Please enter a valid stock quantity."
+	ErrInvalidRating     = "Rating must be between 1 and 5. Please enter a valid rating."
+	ErrInvalidFileType   = "Invalid file type. Allowed types are: jpg, jpeg, png, gif. Please upload a valid image file."
+	ErrFileTooLarge      = "File size exceeds the 5MB limit. Please upload a smaller file."
+	ErrInvalidPagination = "Invalid pagination parameters. Page must be greater than 0 and limit between 1 and 100."
 
 	// Database errors
-	ErrRecordNotFound = "Record not found"
-	ErrDuplicateEntry = "Duplicate entry"
-	ErrDBConnection   = "Database connection error"
+	ErrRecordNotFound = "The requested record was not found. Please check the ID and try again."
+	ErrDuplicateEntry = "A record with this information already exists. Please use different information."
+	ErrDBConnection   = "Unable to connect to the database. Please try again later or contact support if the issue persists."
 
 	// Server errors
-	ErrInternalServer     = "Internal server error"
-	ErrServiceUnavailable = "Service unavailable"
+	ErrInternalServer     = "An internal server error occurred. Please try again later or contact support if the issue persists."
+	ErrServiceUnavailable = "The service is temporarily unavailable. Please try again later."
 )
 
 // Success messages

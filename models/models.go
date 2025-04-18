@@ -15,6 +15,12 @@ type User struct {
 	FirstName    string    `json:"first_name"`
 	LastName     string    `json:"last_name"`
 	Phone        string    `json:"phone"`
+	ProfileImage string    `json:"profile_image"`
+	Address      string    `json:"address"`
+	City         string    `json:"city"`
+	State        string    `json:"state"`
+	Country      string    `json:"country"`
+	PostalCode   string    `json:"postal_code"`
 	IsBlocked    bool      `json:"is_blocked"`
 	IsVerified   bool      `json:"is_verified" gorm:"default:false"`
 	IsAdmin      bool      `json:"is_admin" gorm:"default:false"`
@@ -112,4 +118,14 @@ type Order struct {
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// UserOTP represents a one-time password for user verification
+type UserOTP struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	UserID    uint      `json:"user_id" gorm:"not null"`
+	Code      string    `json:"code" gorm:"not null"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"not null"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -29,10 +29,12 @@ func ConnectDatabase() {
 	// Auto migrate the schema
 	err = DB.AutoMigrate(
 		&models.User{},
-		&models.Book{},
+		&models.Admin{},
 		&models.Category{},
-		&models.Genre{},
+		&models.Book{},
+		&models.Review{},
 		&models.PasswordHistory{},
+		&models.UserOTP{},
 		// Future models to be added:
 		// &models.Cart{},
 		// &models.Wishlist{},
