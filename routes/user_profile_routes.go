@@ -9,7 +9,7 @@ import (
 // SetupUserProfileRoutes sets up the routes for user profile management
 func SetupUserProfileRoutes(router *gin.Engine) {
 	// User profile routes (protected)
-	profile := router.Group("/api/v1/profile")
+	profile := router.Group("/v1/profile")
 	profile.Use(middleware.AuthMiddleware())
 	{
 		// Get user profile

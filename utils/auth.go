@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"crypto/rand"
+	"math/big"
 	"errors"
 	"os"
 	"time"
@@ -72,11 +74,18 @@ func ValidateToken(tokenString string) (uint, error) {
 
 // GenerateOTP creates a 6-digit OTP
 func GenerateOTP() string {
-	// Generate a random 6-digit number
-	otp := ""
+	// Use crypto/rand for secure random number generation
+	b := make([]byte, 6)
 	for i := 0; i < 6; i++ {
-		otp += string(rune(48 + time.Now().UnixNano()%10))
-		time.Sleep(time.Nanosecond)
+		num := 0
+		for {
+			r, err := rand.Int(rand.Reader, big.NewInt(10))
+			if err == nil {
+				num = int(r.Int64())
+				break
+			}
+		}
+		b[i] = byte('0' + num)
 	}
-	return otp
+	return string(b)
 }
