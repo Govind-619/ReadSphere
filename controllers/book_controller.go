@@ -385,7 +385,7 @@ func CreateBook(c *gin.Context) {
 		CategoryID:         req.CategoryID,
 		GenreID:            req.GenreID,
 		ImageURL:           req.ImageURL,
-		Images:             req.Images,
+		Images:             strings.Join(req.Images, ","),
 		IsActive:           req.IsActive,
 		IsFeatured:         req.IsFeatured,
 		Author:             req.Author,
@@ -659,7 +659,7 @@ func UpdateBook(c *gin.Context) {
 		log.Printf("Failed to fetch images for book %s: %v", bookID, err)
 		// Continue anyway, as we have the book data
 	} else {
-		updatedBook.Images = images
+		updatedBook.Images = strings.Join(images, ",")
 	}
 
 	log.Printf("Book updated successfully: %s", updatedBook.Name)

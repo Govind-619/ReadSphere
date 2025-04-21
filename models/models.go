@@ -16,11 +16,6 @@ type User struct {
 	LastName     string    `json:"last_name"`
 	Phone        string    `json:"phone"`
 	ProfileImage string    `json:"profile_image"`
-	Address      string    `json:"address"`
-	City         string    `json:"city"`
-	State        string    `json:"state"`
-	Country      string    `json:"country"`
-	PostalCode   string    `json:"postal_code"`
 	IsBlocked    bool      `json:"is_blocked"`
 	IsVerified   bool      `json:"is_verified" gorm:"default:false"`
 	IsAdmin      bool      `json:"is_admin" gorm:"default:false"`
@@ -29,6 +24,8 @@ type User struct {
 	OTPExpiresAt time.Time `json:"-"`
 	LastLoginAt  time.Time `json:"last_login_at"`
 	GoogleID     string    `gorm:"unique;default:null" json:"google_id"`
+
+	Addresses []Address `json:"addresses" gorm:"foreignKey:UserID"`
 }
 
 // Admin represents an administrator in the system
@@ -73,7 +70,8 @@ type Book struct {
 	GenreID            uint      `json:"genre_id"`
 	Genre              Genre     `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
 	ImageURL           string    `json:"image_url"`
-	Images             []string  `json:"images" gorm:"type:text[]"`
+	// Images field removed to prevent scan errors. Only ImageURL is used.
+	Images             string    `json:"images"`
 	IsActive           bool      `json:"is_active" gorm:"default:true"`
 	IsFeatured         bool      `json:"is_featured" gorm:"default:false"`
 	Views              int       `json:"views" gorm:"default:0"`

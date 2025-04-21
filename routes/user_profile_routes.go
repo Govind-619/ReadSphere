@@ -27,5 +27,12 @@ func SetupUserProfileRoutes(router *gin.Engine) {
 
 		// Upload profile image
 		profile.POST("/image", controllers.UploadProfileImage)
+
+		// Address management
+		profile.POST("/address", controllers.AddAddress)
+		profile.PUT("/address/:id", controllers.EditAddress)
+		profile.DELETE("/address/:id", controllers.DeleteAddress)
+		profile.PUT("/address/:id/default", controllers.SetDefaultAddress)
+		profile.GET("/address", controllers.GetAddresses)
 	}
 }

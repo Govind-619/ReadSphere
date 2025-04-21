@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -284,7 +285,7 @@ func ListBooksByGenre(c *gin.Context) {
 			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
 			// Continue anyway, as we have the book data
 		} else {
-			books[i].Images = images
+			books[i].Images = strings.Join(images, ",")
 		}
 	}
 

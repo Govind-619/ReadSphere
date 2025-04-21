@@ -287,7 +287,7 @@ func UpdateBookByField(c *gin.Context) {
 		log.Printf("Failed to fetch images for book %d: %v", book.ID, err)
 		// Continue anyway, as we have the book data
 	} else {
-		updatedBook.Images = images
+		updatedBook.Images = strings.Join(images, ",")
 	}
 
 	log.Printf("Book updated successfully: %s", updatedBook.Name)

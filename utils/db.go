@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"log"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -88,25 +87,25 @@ func CreateBook(book *models.Book) error {
 	return config.DB.Create(book).Error
 }
 
-// GetBookByID retrieves a book by ID
-func GetBookByID(id uint) (*models.Book, error) {
-	// First, fetch the book without the images field
+// GetBookByIDForCart retrieves a book by ID for cart purposes (no images array)
+func GetBookByIDForCart(id uint) (*models.Book, error) {
 	var book models.Book
 	err := config.DB.Preload("Category").Preload("Reviews").First(&book, id).Error
 	if err != nil {
 		return nil, err
 	}
-
-	// Now fetch the images separately
-	var images []string
-	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", id).Scan(&images).Error; err != nil {
-		log.Printf("Failed to fetch images for book %d: %v", id, err)
-		// Continue anyway, as we have the book data
-	} else {
-		book.Images = images
-	}
-
 	return &book, nil
+}
+
+// GetBookByIDWithImages is deprecated since the Book struct no longer has an Images field.
+// Use GetBookByIDForCart or GetBookByID instead.
+func GetBookByIDWithImages(id uint) (*models.Book, error) {
+	return GetBookByIDForCart(id)
+}
+
+// GetBookByID is an alias for GetBookByIDWithImages for backward compatibility
+func GetBookByID(id uint) (*models.Book, error) {
+	return GetBookByIDWithImages(id)
 }
 
 // UpdateBook updates a book
@@ -148,16 +147,7 @@ func GetBooksByCategory(categoryID uint, page, limit int) ([]models.Book, int64,
 		return nil, 0, err
 	}
 
-	// Now fetch the images separately for each book
-	for i := range books {
-		var images []string
-		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
-			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
-			// Continue anyway, as we have the book data
-		} else {
-			books[i].Images = images
-		}
-	}
+
 
 	return books, total, nil
 }
@@ -193,16 +183,7 @@ func SearchBooks(query string, page, limit int) ([]models.Book, int64, error) {
 		return nil, 0, err
 	}
 
-	// Now fetch the images separately for each book
-	for i := range books {
-		var images []string
-		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
-			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
-			// Continue anyway, as we have the book data
-		} else {
-			books[i].Images = images
-		}
-	}
+
 
 	return books, total, nil
 }

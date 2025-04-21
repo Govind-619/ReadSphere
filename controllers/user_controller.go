@@ -1,9 +1,9 @@
 package controllers
 
 import (
-	"fmt"
+	"crypto/rand"
 	"log"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"os"
 	"time"
@@ -663,7 +663,18 @@ func AddReview(c *gin.Context) {
 }
 
 func generateOTP() string {
-	rand.Seed(time.Now().UnixNano())
-	otp := rand.Intn(900000) + 100000 // 6-digit OTP
-	return fmt.Sprintf("%06d", otp)
+	// Use crypto/rand for secure random number generation
+	b := make([]byte, 6)
+	for i := 0; i < 6; i++ {
+		num := 0
+		for {
+			r, err := rand.Int(rand.Reader, big.NewInt(10))
+			if err == nil {
+				num = int(r.Int64())
+				break
+			}
+		}
+		b[i] = byte('0' + num)
+	}
+	return string(b)
 }

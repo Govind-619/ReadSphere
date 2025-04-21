@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
+
 	"strings"
 	"time"
 
@@ -33,11 +33,7 @@ func GetUserProfile(c *gin.Context) {
 		"last_name":     userModel.LastName,
 		"phone":         userModel.Phone,
 		"profile_image": userModel.ProfileImage,
-		"address":       userModel.Address,
-		"city":          userModel.City,
-		"state":         userModel.State,
-		"country":       userModel.Country,
-		"postal_code":   userModel.PostalCode,
+
 	})
 }
 
@@ -47,11 +43,6 @@ type UpdateProfileRequest struct {
 	FirstName  string `json:"first_name"`
 	LastName   string `json:"last_name"`
 	Phone      string `json:"phone"`
-	Address    string `json:"address"`
-	City       string `json:"city"`
-	State      string `json:"state"`
-	Country    string `json:"country"`
-	PostalCode string `json:"postal_code"`
 }
 
 // UpdateProfile handles profile updates (excluding email)
@@ -118,54 +109,6 @@ func UpdateProfile(c *gin.Context) {
 			return
 		}
 		updates["phone"] = req.Phone
-	}
-
-	// Address, city, state, country: trim and validate length
-	if req.Address != "" {
-		addr := strings.TrimSpace(req.Address)
-		if err := utils.ValidateStringLength(addr, 2, 100); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Address " + err.Error()})
-			return
-		}
-		updates["address"] = addr
-	}
-	if req.City != "" {
-		city := strings.TrimSpace(req.City)
-		if err := utils.ValidateStringLength(city, 2, 100); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "City " + err.Error()})
-			return
-		}
-		updates["city"] = city
-	}
-	if req.State != "" {
-		state := strings.TrimSpace(req.State)
-		if err := utils.ValidateStringLength(state, 2, 100); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "State " + err.Error()})
-			return
-		}
-		updates["state"] = state
-	}
-	if req.Country != "" {
-		country := strings.TrimSpace(req.Country)
-		if err := utils.ValidateStringLength(country, 2, 100); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Country " + err.Error()})
-			return
-		}
-		updates["country"] = country
-	}
-
-	// Postal code: numeric and length (6 for India)
-	if req.PostalCode != "" {
-		postal := strings.TrimSpace(req.PostalCode)
-		if _, err := strconv.Atoi(postal); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Postal code must be numeric"})
-			return
-		}
-		if len(postal) != 6 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Postal code must be 6 digits"})
-			return
-		}
-		updates["postal_code"] = postal
 	}
 
 	if len(updates) == 0 {

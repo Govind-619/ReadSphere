@@ -6,6 +6,7 @@ import (
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/controllers"
+	"github.com/Govind-619/ReadSphere/models"
 	"github.com/Govind-619/ReadSphere/routes"
 	"github.com/Govind-619/ReadSphere/utils"
 )
@@ -22,6 +23,9 @@ func main() {
 
 	// Initialize database
 	config.InitDB()
+
+	// Migrate database models
+	config.DB.AutoMigrate(&models.Cart{})
 
 	// Create sample admin
 	if err := controllers.CreateSampleAdmin(); err != nil {

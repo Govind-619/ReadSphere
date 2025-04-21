@@ -77,6 +77,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.GET("/cart", controllers.GetCart)
 		protected.PUT("/cart/update", controllers.UpdateCart)
 		protected.DELETE("/cart/remove", controllers.RemoveFromCart)
+		protected.DELETE("/cart/clear", controllers.ClearCart)
 
 		// Wishlist operations
 		protected.POST("/wishlist/add", controllers.AddToWishlist)
