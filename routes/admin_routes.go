@@ -55,6 +55,14 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.DELETE("/genres/:id", controllers.DeleteGenre)
 			admin.GET("/genres", controllers.GetGenres)
 			admin.GET("/genres/:id", controllers.ListBooksByGenre)
+
+			// Order management (admin)
+			admin.GET("/orders", controllers.AdminListOrders)
+			admin.GET("/orders/:id", controllers.AdminGetOrderDetails)
+			admin.PUT("/orders/:id/status", controllers.AdminUpdateOrderStatus)
+			admin.POST("/orders/:id/return/accept", controllers.AdminAcceptReturn)
+admin.POST("/orders/:id/return/reject", controllers.AdminRejectReturn)
+
 		}
 	}
 }

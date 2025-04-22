@@ -84,6 +84,18 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.GET("/wishlist", controllers.GetWishlist)
 		protected.DELETE("/wishlist/remove", controllers.RemoveFromWishlist)
 
+		// Checkout
+		protected.GET("/checkout", controllers.GetCheckoutSummary)
+		protected.POST("/checkout", controllers.PlaceOrder)
+
+		// Orders
+		protected.GET("/orders", controllers.ListOrders)
+		protected.GET("/orders/:id", controllers.GetOrderDetails)
+		protected.POST("/orders/:id/cancel", controllers.CancelOrder)
+		protected.POST("/orders/:id/items/:item_id/cancel", controllers.CancelOrderItem)
+		protected.POST("/orders/:id/return", controllers.ReturnOrder)
+		protected.GET("/orders/:id/invoice", controllers.DownloadInvoice)
+
 		// Reviews
 		protected.POST("/books/:id/review", controllers.AddReview)
 		protected.GET("/books/:id/reviews", controllers.GetBookReviews)

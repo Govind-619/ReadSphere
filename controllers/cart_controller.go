@@ -46,9 +46,18 @@ func AddToCart(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
 		return
 	}
-	if !book.IsActive {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available"})
+	if !book.IsActive || book.Blocked {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available or blocked by admin"})
 		return
+	}
+	if book.CategoryID != 0 {
+		var category models.Category
+		db := config.DB
+		db.First(&category, book.CategoryID)
+		if category.Blocked {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Category blocked by admin"})
+			return
+		}
 	}
 	if book.Stock < 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
@@ -56,12 +65,8 @@ func AddToCart(c *gin.Context) {
 	}
 
 	// Remove from wishlist if present
-	var wishlist models.Wishlist
 	db := config.DB
-	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).First(&wishlist)
-	if wishlist.ID != 0 {
-		db.Delete(&wishlist)
-	}
+	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).Delete(&models.Wishlist{})
 
 	// Check if already in cart
 	var cart models.Cart
@@ -103,7 +108,18 @@ func AddToCart(c *gin.Context) {
 		if err == nil && book != nil {
 			cartItems[i].Book = *book
 		}
-		if !cartItems[i].Book.IsActive || cartItems[i].Book.Stock < cartItems[i].Quantity {
+		if !cartItems[i].Book.IsActive || cartItems[i].Book.Blocked {
+			canCheckout = false
+		}
+		if cartItems[i].Book.CategoryID != 0 {
+			var category models.Category
+			db := config.DB
+			db.First(&category, cartItems[i].Book.CategoryID)
+			if category.Blocked {
+				canCheckout = false
+			}
+		}
+		if cartItems[i].Book.Stock < cartItems[i].Quantity {
 			canCheckout = false
 		}
 	}
@@ -162,7 +178,18 @@ func GetCart(c *gin.Context) {
 		if err == nil && book != nil {
 			cartItems[i].Book = *book
 		}
-		if !cartItems[i].Book.IsActive || cartItems[i].Book.Stock < cartItems[i].Quantity {
+		if !cartItems[i].Book.IsActive || cartItems[i].Book.Blocked {
+			canCheckout = false
+		}
+		if cartItems[i].Book.CategoryID != 0 {
+			var category models.Category
+			db := config.DB
+			db.First(&category, cartItems[i].Book.CategoryID)
+			if category.Blocked {
+				canCheckout = false
+			}
+		}
+		if cartItems[i].Book.Stock < cartItems[i].Quantity {
 			canCheckout = false
 		}
 	}
@@ -266,7 +293,18 @@ func UpdateCart(c *gin.Context) {
 		if err == nil && book != nil {
 			cartItems[i].Book = *book
 		}
-		if !cartItems[i].Book.IsActive || cartItems[i].Book.Stock < cartItems[i].Quantity {
+		if !cartItems[i].Book.IsActive || cartItems[i].Book.Blocked {
+			canCheckout = false
+		}
+		if cartItems[i].Book.CategoryID != 0 {
+			var category models.Category
+			db := config.DB
+			db.First(&category, cartItems[i].Book.CategoryID)
+			if category.Blocked {
+				canCheckout = false
+			}
+		}
+		if cartItems[i].Book.Stock < cartItems[i].Quantity {
 			canCheckout = false
 		}
 	}
@@ -342,9 +380,18 @@ func CheckoutCart(c *gin.Context) {
 		return
 	}
 	for _, item := range cartItems {
-		if !item.Book.IsActive {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available"})
+		if !item.Book.IsActive || item.Book.Blocked {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available or blocked by admin"})
 			return
+		}
+		if item.Book.CategoryID != 0 {
+			var category models.Category
+			db := config.DB
+			db.First(&category, item.Book.CategoryID)
+			if category.Blocked {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Category blocked by admin"})
+				return
+			}
 		}
 		if item.Book.Stock < item.Quantity {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})

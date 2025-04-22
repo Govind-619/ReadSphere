@@ -68,9 +68,9 @@ func AddAddress(c *gin.Context) {
 	}
 
 	// Auto-formatting: capitalize city, state, country
-	req.City = strings.Title(strings.ToLower(strings.TrimSpace(req.City)))
-	req.State = strings.Title(strings.ToLower(strings.TrimSpace(req.State)))
-	req.Country = strings.Title(strings.ToLower(strings.TrimSpace(req.Country)))
+	req.City = utils.Title(strings.ToLower(strings.TrimSpace(req.City)))
+	req.State = utils.Title(strings.ToLower(strings.TrimSpace(req.State)))
+	req.Country = utils.Title(strings.ToLower(strings.TrimSpace(req.Country)))
 
 	// Unset previous default if needed
 	if req.IsDefault {
@@ -160,13 +160,13 @@ func EditAddress(c *gin.Context) {
 
 	// Auto-formatting: capitalize city, state, country
 	if req.City != "" {
-		req.City = strings.Title(strings.ToLower(strings.TrimSpace(req.City)))
+		req.City = utils.Title(strings.ToLower(strings.TrimSpace(req.City)))
 	}
 	if req.State != "" {
-		req.State = strings.Title(strings.ToLower(strings.TrimSpace(req.State)))
+		req.State = utils.Title(strings.ToLower(strings.TrimSpace(req.State)))
 	}
 	if req.Country != "" {
-		req.Country = strings.Title(strings.ToLower(strings.TrimSpace(req.Country)))
+		req.Country = utils.Title(strings.ToLower(strings.TrimSpace(req.Country)))
 	}
 
 	// Update fields if provided

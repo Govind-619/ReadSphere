@@ -45,6 +45,7 @@ type Category struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Books       []Book `json:"books,omitempty"`
+	Blocked     bool   `json:"blocked" gorm:"default:false"`
 }
 
 // Genre represents a book genre
@@ -85,6 +86,7 @@ type Book struct {
 	Pages              int       `json:"pages"`
 	Language           string    `json:"language" gorm:"default:'English'"`
 	Format             string    `json:"format" gorm:"default:'Paperback'"`
+	Blocked            bool      `json:"blocked" gorm:"default:false"`
 }
 
 // Review represents a book review
@@ -107,16 +109,7 @@ type Cart struct {
 	Quantity int  `json:"quantity"`
 }
 
-// Order represents an order in the system
-type Order struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	UserID      uint      `json:"user_id"`
-	User        User      `json:"user"`
-	TotalAmount float64   `json:"total_amount"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
+// Order struct moved to order.go. See models/order.go for details.
 
 // UserOTP represents a one-time password for user verification
 type UserOTP struct {

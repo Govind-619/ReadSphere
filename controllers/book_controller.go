@@ -61,6 +61,7 @@ type BookListItem struct {
 	Price    float64 `json:"price"`
 	ImageURL string  `json:"image_url"`
 	IsActive bool    `json:"is_active"`
+	Stock    int     `json:"stock"`
 }
 
 // GetBooks handles listing books with search, pagination, and sorting
@@ -112,7 +113,7 @@ func GetBooks(c *gin.Context) {
 	// Build the base query with only essential fields
 	query := `
 		SELECT 
-			id, name, author, price, image_url, is_active
+			id, name, author, price, image_url, is_active, stock
 		FROM books 
 		WHERE deleted_at IS NULL
 	`

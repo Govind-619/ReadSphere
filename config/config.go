@@ -110,6 +110,11 @@ func InitDB() {
 		&models.Review{},
 		&models.PasswordHistory{},
 		&models.UserOTP{},
+		&models.Cart{},
+		&models.Wishlist{},
+		&models.Order{},
+		&models.OrderItem{},
+		&models.Address{},
 	)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to migrate database: %v", err))
