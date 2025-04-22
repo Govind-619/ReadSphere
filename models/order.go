@@ -9,7 +9,7 @@ type Order struct {
 	UserID       uint      `json:"user_id"`
 	User         User      `json:"user" gorm:"foreignKey:UserID"`
 	AddressID    uint      `json:"address_id"`
-	Address      Address   `json:"address"`
+	Address      Address   `json:"address" gorm:"foreignKey:AddressID"`
 	TotalAmount  float64   `json:"total_amount"`
 	Discount     float64   `json:"discount"`
 	Tax          float64   `json:"tax"`

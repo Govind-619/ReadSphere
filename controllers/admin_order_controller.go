@@ -3,8 +3,8 @@ package controllers
 import (
 	"net/http"
 	"strconv"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -38,17 +38,21 @@ func AdminListOrders(c *gin.Context) {
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if page < 1 { page = 1 }
-	if limit < 1 { limit = 20 }
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
 	var total int64
 	query.Model(&models.Order{}).Count(&total)
-	query.Offset((page-1)*limit).Limit(limit).Find(&orders)
+	query.Offset((page - 1) * limit).Limit(limit).Find(&orders)
 
 	c.JSON(http.StatusOK, gin.H{
 		"orders": orders,
-		"total": total,
-		"page": page,
-		"limit": limit,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
 	})
 }
 
@@ -98,10 +102,26 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
+	// Prevent cancellation if order is already shipped, delivered, or out for delivery
+	if strings.EqualFold(req.Status, "Cancelled") && (strings.EqualFold(order.Status, "Shipped") || strings.EqualFold(order.Status, "Delivered") || strings.EqualFold(order.Status, "Out for Delivery")) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot cancel an order that is already shipped, out for delivery, or delivered"})
+		return
+	}
+	// If status is being set to Cancelled and order is not shipped, restock books
+	shouldRestock := false
+	if strings.EqualFold(req.Status, "Cancelled") && (strings.EqualFold(order.Status, "Pending") || strings.EqualFold(order.Status, "Out for Delivery")) {
+		shouldRestock = true
+	}
 	order.Status = req.Status
 	order.UpdatedAt = time.Now()
 	config.DB.Save(&order)
-
+	if shouldRestock {
+		var items []models.OrderItem
+		config.DB.Where("order_id = ?", order.ID).Find(&items)
+		for _, item := range items {
+			config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
+		}
+	}
 	// Reload full order with relations for response
 	var fullOrder models.Order
 	config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&fullOrder, orderID)
@@ -149,7 +169,7 @@ func AdminAcceptReturn(c *gin.Context) {
 		return
 	}
 	var order models.Order
-	if err := config.DB.Preload("User").First(&order, orderID).Error; err != nil {
+	if err := config.DB.Preload("User").Preload("OrderItems").First(&order, orderID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
@@ -162,5 +182,9 @@ func AdminAcceptReturn(c *gin.Context) {
 	order.Status = "Return Accepted"
 	order.UpdatedAt = time.Now()
 	config.DB.Save(&order)
-	c.JSON(http.StatusOK, gin.H{"message": "Return accepted and refunded", "order": order})
+	// Restock books
+	for _, item := range order.OrderItems {
+		config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Return accepted, refunded, and stock reverted", "order": order})
 }
