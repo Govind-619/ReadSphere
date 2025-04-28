@@ -26,7 +26,7 @@ type BookRequest struct {
 	CategoryID         uint      `json:"category_id" binding:"required"`
 	GenreID            uint      `json:"genre_id" binding:"required"`
 	ImageURL           string    `json:"image_url"`
-	Images             []string  `json:"images"`
+	BookImages         []string  `json:"images"`
 	IsActive           bool      `json:"is_active"`
 	IsFeatured         bool      `json:"is_featured"`
 	Author             string    `json:"author" binding:"required"`
@@ -360,20 +360,6 @@ func CreateBook(c *gin.Context) {
 		return
 	}
 
-	// Check if category exists
-	if err := EnsureCategoryExists(req.CategoryID); err != nil {
-		log.Printf("Category validation failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Check if genre exists
-	if err := EnsureGenreExists(req.GenreID); err != nil {
-		log.Printf("Genre validation failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	// Create the book
 	book := models.Book{
 		Name:               req.Name,
@@ -386,7 +372,6 @@ func CreateBook(c *gin.Context) {
 		CategoryID:         req.CategoryID,
 		GenreID:            req.GenreID,
 		ImageURL:           req.ImageURL,
-		Images:             strings.Join(req.Images, ","),
 		IsActive:           req.IsActive,
 		IsFeatured:         req.IsFeatured,
 		Author:             req.Author,
@@ -400,15 +385,31 @@ func CreateBook(c *gin.Context) {
 
 	if err := config.DB.Create(&book).Error; err != nil {
 		log.Printf("Failed to create book: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create book"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "Failed to create book",
+			"reason": err.Error(),
+		})
 		return
 	}
+
+	// Insert BookImages if provided
+	for _, url := range req.BookImages {
+		if url != "" {
+			if err := config.DB.Create(&models.BookImage{BookID: book.ID, URL: url}).Error; err != nil {
+				log.Printf("Failed to insert BookImage: %v", err)
+			}
+		}
+	}
+
+	// Preload BookImages for response
+	config.DB.Preload("BookImages").First(&book, book.ID)
 
 	log.Printf("Book created successfully: %s", book.Name)
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Book created successfully",
 		"book":    book,
 	})
+	return
 }
 
 // UpdateBook handles book updates
@@ -513,11 +514,7 @@ func UpdateBook(c *gin.Context) {
 
 	if categoryID, ok := updateData["category_id"].(float64); ok && categoryID > 0 {
 		// Ensure category exists
-		if err := EnsureCategoryExists(uint(categoryID)); err != nil {
-			log.Printf("Failed to ensure category exists: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to ensure category exists"})
-			return
-		}
+
 		updates["category_id"] = uint(categoryID)
 	}
 
@@ -526,7 +523,7 @@ func UpdateBook(c *gin.Context) {
 	}
 
 	// Handle images array separately
-	if images, ok := updateData["images"].([]interface{}); ok && len(images) > 0 {
+	if images, ok := updateData["images"].([]interface{}); ok {
 		// Convert []interface{} to []string
 		imageURLs := make([]string, len(images))
 		for i, img := range images {
@@ -542,21 +539,21 @@ func UpdateBook(c *gin.Context) {
 			return
 		}
 
-		// Format the array for PostgreSQL
-		imagesArray := "ARRAY["
-		for i, img := range imageURLs {
-			if i > 0 {
-				imagesArray += ", "
-			}
-			imagesArray += fmt.Sprintf("'%s'", strings.ReplaceAll(img, "'", "''"))
-		}
-		imagesArray += "]::text[]"
-
-		// Update the images field using a raw SQL query
-		if err := config.DB.Exec("UPDATE books SET images = "+imagesArray+" WHERE id = ?", bookID).Error; err != nil {
-			log.Printf("Failed to update images: %v", err)
+		// Delete existing BookImages for this book
+		if err := config.DB.Where("book_id = ?", book.ID).Delete(&models.BookImage{}).Error; err != nil {
+			log.Printf("Failed to delete old BookImages: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update images: " + err.Error()})
 			return
+		}
+
+		// Insert new BookImages
+		for _, url := range imageURLs {
+			if url != "" {
+				img := models.BookImage{BookID: book.ID, URL: url}
+				if err := config.DB.Create(&img).Error; err != nil {
+					log.Printf("Failed to insert BookImage: %v", err)
+				}
+			}
 		}
 	}
 
@@ -593,11 +590,7 @@ func UpdateBook(c *gin.Context) {
 
 	if genreID, ok := updateData["genre_id"].(float64); ok && genreID > 0 {
 		// Ensure genre exists
-		if err := EnsureGenreExists(uint(genreID)); err != nil {
-			log.Printf("Failed to ensure genre exists: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to ensure genre exists"})
-			return
-		}
+
 		updates["genre_id"] = uint(genreID)
 	}
 
@@ -631,42 +624,51 @@ func UpdateBook(c *gin.Context) {
 		}
 	}
 
-	// Fetch the updated book with explicit error handling
+	// Fetch the updated book with all relations using GORM Preload and the correct ID
+	var idUint uint64
+	var err error
+	idUint, err = strconv.ParseUint(bookID, 10, 64)
+	if err != nil {
+		log.Printf("Invalid book ID: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
+		return
+	}
 	var updatedBook models.Book
-	query = `
-		SELECT 
-			id, created_at, updated_at, deleted_at, 
-			name, description, price, original_price, discount_percentage, discount_end_date, stock, category_id, 
-			genre_id, image_url, is_active, is_featured, views, 
-			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages, language, format
-		FROM books 
-		WHERE id = ?
-	`
-
-	if err := config.DB.Raw(query, bookID).Scan(&updatedBook).Error; err != nil {
+	if err := config.DB.Preload("BookImages").Preload("Category").Preload("Genre").First(&updatedBook, uint(idUint)).Error; err != nil {
 		log.Printf("Failed to fetch updated book: %v", err)
-		// Return the book we updated, even if we couldn't fetch the updated version
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Book updated successfully, but failed to fetch updated version",
+			"message": "Book updated, but failed to fetch updated details",
+			"book":    book,
+		})
+		return
+	}
+	log.Printf("Book updated successfully: %s", updatedBook.Name)
+	idUint, err = strconv.ParseUint(bookID, 10, 64)
+if err != nil {
+	log.Printf("Invalid book ID: %v", err)
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
+	return
+}
+if err := config.DB.Preload("BookImages").Preload("Category").Preload("Genre").First(&updatedBook, book.ID).Error; err != nil {
+		log.Printf("Failed to fetch updated book: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Book updated, but failed to fetch updated details",
 			"book":    book,
 		})
 		return
 	}
 
-	// Now fetch the images separately
-	var images []string
-	if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", bookID).Scan(&images).Error; err != nil {
-		log.Printf("Failed to fetch images for book %s: %v", bookID, err)
-		// Continue anyway, as we have the book data
-	} else {
-		updatedBook.Images = strings.Join(images, ",")
+	// Ensure images field is populated in the response
+	images := []string{}
+	for _, img := range updatedBook.BookImages {
+		images = append(images, img.URL)
 	}
 
 	log.Printf("Book updated successfully: %s", updatedBook.Name)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Book updated successfully",
 		"book":    updatedBook,
+		"images":  images,
 	})
 }
 
@@ -826,7 +828,7 @@ func GetBookDetails(c *gin.Context) {
 	if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", bookID).Scan(&imagesJSON).Error; err != nil {
 		log.Printf("Failed to fetch images for book %s: %v", bookID, err)
 	} else {
-		if err := json.Unmarshal([]byte(imagesJSON), &book.Images); err != nil {
+		if err := json.Unmarshal([]byte(imagesJSON), &book.BookImages); err != nil {
 			log.Printf("Failed to parse images JSON for book %s: %v", bookID, err)
 		}
 	}
@@ -927,6 +929,10 @@ func GetBookDetails(c *gin.Context) {
 	// Check if user is admin
 	_, isAdmin := c.Get("admin")
 
+	// Fetch book images
+	var bookBookImages []models.BookImage
+	config.DB.Where("book_id = ?", book.ID).Find(&bookBookImages)
+
 	// Create response based on user role
 	response := gin.H{
 		"book":                book,
@@ -940,6 +946,7 @@ func GetBookDetails(c *gin.Context) {
 		"stock_message":       stockMessage,
 		"specifications":      specs,
 		"related_books":       relatedBooks,
+		"images":              bookBookImages,
 	}
 
 	// If not admin, remove sensitive fields
@@ -951,7 +958,7 @@ func GetBookDetails(c *gin.Context) {
 			"description":      book.Description,
 			"price":            book.Price,
 			"image_url":        book.ImageURL,
-			"images":           book.Images,
+			"images":           book.BookImages,
 			"author":           book.Author,
 			"publisher":        book.Publisher,
 			"isbn":             book.ISBN,
@@ -1011,21 +1018,21 @@ func CheckBookExists(c *gin.Context) {
 		return
 	}
 
-	// Now fetch the images separately
-	var imagesJSON string
-	if err := config.DB.Raw("SELECT COALESCE(array_to_json(images), '[]'::json) FROM books WHERE id = ?", id).Scan(&imagesJSON).Error; err != nil {
-		log.Printf("Failed to fetch images for book %s: %v", id, err)
-		// Continue anyway, as we have the book data
-	} else {
-		// Parse the JSON string into []string
-		if err := json.Unmarshal([]byte(imagesJSON), &book.Images); err != nil {
-			log.Printf("Failed to parse images JSON for book %s: %v", id, err)
-		}
+	// Fetch BookImages from the BookImage table
+	var bookImages []models.BookImage
+	if err := config.DB.Where("book_id = ?", book.ID).Find(&bookImages).Error; err != nil {
+		log.Printf("Failed to fetch BookImages for book %s: %v", id, err)
+	}
+	// Build images array
+	images := []string{}
+	for _, img := range bookImages {
+		images = append(images, img.URL)
 	}
 
 	log.Printf("Book found: %s (ID: %s)", book.Name, id)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Book found",
 		"book":    book,
+		"images":  images,
 	})
 }

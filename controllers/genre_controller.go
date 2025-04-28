@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -259,34 +258,12 @@ func ListBooksByGenre(c *gin.Context) {
 		return
 	}
 
-	// Get books for the genre using a raw SQL query to handle the text[] column properly
+	// Fetch books for the genre and preload related images from BookImage table
 	var books []models.Book
-	query := `
-		SELECT 
-			id, created_at, updated_at, deleted_at, 
-			name, description, price, stock, category_id, 
-			image_url, is_active, is_featured, views, 
-			average_rating, total_reviews, author, publisher, 
-			isbn, publication_year, genre, pages
-		FROM books 
-		WHERE genre_id = ? AND is_active = ? AND deleted_at IS NULL
-	`
-
-	if err := config.DB.Raw(query, genreID, true).Scan(&books).Error; err != nil {
+	if err := config.DB.Preload("BookImages").Where("genre_id = ? AND is_active = ? AND deleted_at IS NULL", genreID, true).Find(&books).Error; err != nil {
 		log.Printf("Failed to fetch books: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
 		return
-	}
-
-	// Now fetch the images separately for each book
-	for i := range books {
-		var images []string
-		if err := config.DB.Raw("SELECT images FROM books WHERE id = ?", books[i].ID).Scan(&images).Error; err != nil {
-			log.Printf("Failed to fetch images for book %d: %v", books[i].ID, err)
-			// Continue anyway, as we have the book data
-		} else {
-			books[i].Images = strings.Join(images, ",")
-		}
 	}
 
 	log.Printf("Found %d books for genre %s", len(books), genre.Name)

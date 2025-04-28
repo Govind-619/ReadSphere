@@ -64,11 +64,44 @@ func GetOrderDetails(c *gin.Context) {
 		return
 	}
 	var order models.Order
-	if err := config.DB.Preload("OrderItems.Book").Preload("Address").Where("id = ? AND user_id = ?", orderID, user.ID).First(&order).Error; err != nil {
+	if err := config.DB.Preload("OrderItems.Book").Preload("Address").Preload("User").Where("id = ? AND user_id = ?", orderID, user.ID).First(&order).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"order": order})
+	// Prepare minimal items
+	items := make([]OrderBookDetailsMinimal, 0, len(order.OrderItems))
+	for _, item := range order.OrderItems {
+		items = append(items, OrderBookDetailsMinimal{
+			ItemID:     item.ID,
+			Name:       item.Book.Name,
+			Price:      item.Price,
+			CategoryID: item.Book.CategoryID,
+			GenreID:    item.Book.GenreID,
+			Quantity:   item.Quantity,
+			Discount:   item.Discount,
+			Total:      item.Total,
+		})
+	}
+	// Prepare minimal user info
+	name := ""
+	email := ""
+	if order.User.ID != 0 {
+		name = order.User.FirstName + " " + order.User.LastName
+		email = order.User.Email
+	}
+	resp := OrderDetailsMinimalResponse{
+		Email:         email,
+		Name:          name,
+		Address:       order.Address,
+		TotalAmount:   order.TotalAmount,
+		Discount:      order.Discount,
+		Tax:           order.Tax,
+		FinalTotal:    order.FinalTotal,
+		PaymentMethod: order.PaymentMethod,
+		Status:        order.Status,
+		Items:         items,
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // CancelOrder cancels an entire order, restores stock, and records reason
@@ -105,7 +138,7 @@ func CancelOrder(c *gin.Context) {
 	order.UpdatedAt = time.Now()
 	config.DB.Save(&order)
 	// Optionally, save cancel reason in a dedicated field or table
-	c.JSON(http.StatusOK, gin.H{"message": "Order cancelled", "order": order})
+	c.JSON(http.StatusOK, gin.H{"message": "Order cancelled"})
 }
 
 // CancelOrderItem cancels a single item in an order
@@ -121,9 +154,11 @@ func CancelOrderItem(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID"})
 		return
 	}
-	itemID, err := strconv.Atoi(c.Param("item_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid item ID"})
+	itemIDStr := c.Param("item_id")
+	var itemID uint
+	_, err = fmt.Sscanf(itemIDStr, "%d", &itemID)
+	if err != nil || itemID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid item ID", "debug": itemIDStr})
 		return
 	}
 	var req struct {
@@ -132,7 +167,19 @@ func CancelOrderItem(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 	var item models.OrderItem
 	if err := config.DB.Where("id = ? AND order_id = ?", itemID, orderID).First(&item).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Order item not found"})
+		// Debug: list all items for this order
+		var items []models.OrderItem
+		config.DB.Where("order_id = ?", orderID).Find(&items)
+		itemIDs := make([]uint, len(items))
+		for i, it := range items {
+			itemIDs[i] = it.ID
+		}
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Order item not found",
+			"order_id": orderID,
+			"item_id": itemID,
+			"item_ids_for_order": itemIDs,
+		})
 		return
 	}
 	// Fetch the order and check ownership
@@ -187,7 +234,40 @@ func ReturnOrder(c *gin.Context) {
 	// Reload order with all relations for response
 	var fullOrder models.Order
 	config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&fullOrder, order.ID)
-	c.JSON(http.StatusOK, gin.H{"message": "Order returned", "order": fullOrder})
+	// Prepare minimal items
+	items := make([]OrderBookDetailsMinimal, 0, len(fullOrder.OrderItems))
+	for _, item := range fullOrder.OrderItems {
+		items = append(items, OrderBookDetailsMinimal{
+			ItemID:     item.ID,
+			Name:       item.Book.Name,
+			Price:      item.Price,
+			CategoryID: item.Book.CategoryID,
+			GenreID:    item.Book.GenreID,
+			Quantity:   item.Quantity,
+			Discount:   item.Discount,
+			Total:      item.Total,
+		})
+	}
+	// Prepare minimal user info
+	name := ""
+	email := ""
+	if fullOrder.User.ID != 0 {
+		name = fullOrder.User.FirstName + " " + fullOrder.User.LastName
+		email = fullOrder.User.Email
+	}
+	resp := OrderDetailsMinimalResponse{
+		Email:         email,
+		Name:          name,
+		Address:       fullOrder.Address,
+		TotalAmount:   fullOrder.TotalAmount,
+		Discount:      fullOrder.Discount,
+		Tax:           fullOrder.Tax,
+		FinalTotal:    fullOrder.FinalTotal,
+		PaymentMethod: fullOrder.PaymentMethod,
+		Status:        fullOrder.Status,
+		Items:         items,
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Order returned", "order": resp})
 }
 
 // DownloadInvoice generates and returns a PDF invoice for the order

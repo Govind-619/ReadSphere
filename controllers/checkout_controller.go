@@ -170,11 +170,28 @@ func PlaceOrder(c *gin.Context) {
 	}
 	// Clear cart
 	db.Where("user_id = ?", userID).Delete(&models.Cart{})
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Order placed successfully",
-		"order":        order,
-		"redirect_url": "/thank-you?order_id=" + strconv.FormatUint(uint64(order.ID), 10),
-		"thank_you_page": gin.H{
+	// Prepare minimal book details
+	var booksMinimal []OrderBookMinimal
+	for _, item := range order.OrderItems {
+		booksMinimal = append(booksMinimal, OrderBookMinimal{
+			Name:     item.Book.Name,
+			Author:   item.Book.Author,
+			Price:    item.Price,
+			Quantity: item.Quantity,
+			ImageURL: item.Book.ImageURL,
+		})
+	}
+	// Minimal user info
+	username := user.Username
+	email := user.Email
+	// Prepare response
+	response := PlaceOrderMinimalResponse{
+		Username:     username,
+		Email:        email,
+		Address:      address,
+		Books:        booksMinimal,
+		RedirectURL:  "/thank-you?order_id=" + strconv.FormatUint(uint64(order.ID), 10),
+		ThankYouPage: map[string]interface{}{
 			"title":                 "Thank You for Your Order!",
 			"subtitle":              "Your order has been placed and is being processed.",
 			"order_id":              order.ID,
@@ -183,5 +200,6 @@ func PlaceOrder(c *gin.Context) {
 			"expected_delivery":     "3-7 business days",
 			"continue_shopping_url": "/books",
 		},
-	})
+	}
+	c.JSON(http.StatusOK, response)
 }

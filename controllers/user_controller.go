@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -41,9 +42,10 @@ type RegistrationData struct {
 }
 
 // RegisterUser handles user registration
+
 func RegisterUser(c *gin.Context) {
-	var user models.User
-	if err := c.ShouldBindJSON(&user); err != nil {
+	var req RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid request format",
 			"details": "Please check your input data and ensure all required fields are provided correctly.",
@@ -52,7 +54,7 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// Validate username
-	if valid, msg := utils.ValidateUsername(user.Username); !valid {
+	if valid, msg := utils.ValidateUsername(req.Username); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid username",
 			"details": msg,
@@ -61,7 +63,7 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// Validate email
-	if valid, msg := utils.ValidateEmail(user.Email); !valid {
+	if valid, msg := utils.ValidateEmail(req.Email); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid email",
 			"details": msg,
@@ -70,7 +72,7 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// Validate password
-	if valid, msg := utils.ValidatePassword(user.Password); !valid {
+	if valid, msg := utils.ValidatePassword(req.Password); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid password",
 			"details": msg,
@@ -78,77 +80,86 @@ func RegisterUser(c *gin.Context) {
 		return
 	}
 
+	// Confirm password match
+	if req.Password != req.ConfirmPassword {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Passwords do not match",
+			"details": "Password and confirm password must be the same.",
+		})
+		return
+	}
+
 	// Validate first name if provided
-	if user.FirstName != "" {
-		if valid, msg := utils.ValidateName(user.FirstName); !valid {
+	if req.FirstName != "" {
+		if valid, msg := utils.ValidateName(req.FirstName); !valid {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 	}
 
 	// Validate last name if provided
-	if user.LastName != "" {
-		if valid, msg := utils.ValidateName(user.LastName); !valid {
+	if req.LastName != "" {
+		if valid, msg := utils.ValidateName(req.LastName); !valid {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 	}
 
 	// Validate phone if provided
-	if user.Phone != "" {
-		if valid, msg := utils.ValidatePhone(user.Phone); !valid {
+	if req.Phone != "" {
+		if valid, msg := utils.ValidatePhone(req.Phone); !valid {
 			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 			return
 		}
 	}
 
 	// Check for SQL injection in all fields
-	if valid, msg := utils.ValidateSQLInjection(user.Username); !valid {
+	if valid, msg := utils.ValidateSQLInjection(req.Username); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateSQLInjection(user.Email); !valid {
+	if valid, msg := utils.ValidateSQLInjection(req.Email); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateSQLInjection(user.FirstName); !valid {
+	if valid, msg := utils.ValidateSQLInjection(req.FirstName); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateSQLInjection(user.LastName); !valid {
+	if valid, msg := utils.ValidateSQLInjection(req.LastName); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateSQLInjection(user.Phone); !valid {
+	if valid, msg := utils.ValidateSQLInjection(req.Phone); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
 
 	// Check for XSS in all fields
-	if valid, msg := utils.ValidateXSS(user.Username); !valid {
+	if valid, msg := utils.ValidateXSS(req.Username); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateXSS(user.Email); !valid {
+	if valid, msg := utils.ValidateXSS(req.Email); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateXSS(user.FirstName); !valid {
+	if valid, msg := utils.ValidateXSS(req.FirstName); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateXSS(user.LastName); !valid {
+	if valid, msg := utils.ValidateXSS(req.LastName); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
-	if valid, msg := utils.ValidateXSS(user.Phone); !valid {
+	if valid, msg := utils.ValidateXSS(req.Phone); !valid {
 		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
 		return
 	}
 
 	// Check if username already exists
 	var existingUser models.User
-	if err := config.DB.Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
+	if err := config.DB.Where("username = ?", req.Username).First(&existingUser).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":   "Username already exists",
 			"details": "The username you've chosen is already taken. Please choose a different username.",
@@ -157,7 +168,7 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	// Check if email already exists
-	if err := config.DB.Where("email = ?", user.Email).First(&existingUser).Error; err == nil {
+	if err := config.DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":   "Email already exists",
 			"details": "An account with this email address already exists. Please use a different email or try logging in.",
@@ -165,8 +176,8 @@ func RegisterUser(c *gin.Context) {
 		return
 	}
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	//Hash password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to process password",
@@ -174,36 +185,45 @@ func RegisterUser(c *gin.Context) {
 		})
 		return
 	}
-	user.Password = string(hashedPassword)
 
-	// Create user
-	if err := config.DB.Create(&user).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to create user account",
-			"details": "An error occurred while creating your account. Please try again later.",
-		})
+	// Generate OTP and expiry
+	otp := generateOTP()
+	log.Println("Registration OTP:", otp)
+	otpExpiry := time.Now().Add(1 * time.Minute).Unix()
+	regExpiry := time.Now().Add(15 * time.Minute).Unix()
+
+	// Create JWT with registration info (NO OTP in claims)
+	claims := jwt.MapClaims{
+		"username":    req.Username,
+		"email":       req.Email,
+		"password":    string(hashedPassword),
+		"first_name":  req.FirstName,
+		"last_name":   req.LastName,
+		"phone":       req.Phone,
+		"exp":         regExpiry,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate registration token"})
 		return
 	}
 
-	// Generate OTP
-	otp := generateOTP()
-	otpExpiry := time.Now().Add(15 * time.Minute)
-
-	// Store OTP
-	if err := config.DB.Create(&models.UserOTP{
-		UserID:    user.ID,
-		Code:      otp,
-		ExpiresAt: otpExpiry,
-	}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to generate verification code",
-			"details": "An error occurred while generating your verification code. Please try again later.",
-		})
+	// Store OTP and expiry in session
+	session := sessions.Default(c)
+	session.Set("registration_otp", otp)
+	session.Set("registration_otp_expires", otpExpiry)
+	session.Set("registration_email", req.Email)
+	if err := session.Save(); err != nil {
+		log.Printf("Session save error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 		return
 	}
 
 	// Send OTP email
-	if err := utils.SendOTP(user.Email, otp); err != nil {
+	log.Printf("[OTP RESEND] Registration OTP sent to %s: %s", req.Email, otp)
+	if err := utils.SendOTP(req.Email, otp); err != nil {
+		log.Printf("[OTP RESEND ERROR] Failed to send OTP to %s: %v", req.Email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to send verification email",
 			"details": "An error occurred while sending your verification email. Please try again later.",
@@ -211,9 +231,10 @@ func RegisterUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "User registered successfully. Please check your email for verification code.",
-		"user_id": user.ID,
+	c.JSON(http.StatusOK, gin.H{
+		"message":            "OTP sent to your email. Please verify to complete registration.",
+		"registration_token": tokenString,
+		"expires_in":         900,
 	})
 }
 
@@ -296,95 +317,122 @@ type VerifyOTPRequest struct {
 }
 
 func VerifyOTP(c *gin.Context) {
-	var req VerifyOTPRequest
+	var req struct {
+		OTP               string `json:"otp" binding:"required"`
+		RegistrationToken string `json:"registration_token"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide OTP"})
 		return
 	}
 
-	// Get registration data from session
-	session := sessions.Default(c)
-	email := session.Get("email")
-	if email == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please register first"})
+	// Try to get token from Authorization header first
+	regToken := req.RegistrationToken
+	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			regToken = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+	if regToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Registration token not provided"})
 		return
 	}
 
-	// Check if OTP has expired
-	otpExpires := session.Get("otp_expires").(int64)
-	if time.Now().Unix() > otpExpires {
-		// Generate new OTP
+	// Parse the registration JWT
+	token, err := jwt.Parse(regToken, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_SECRET")), nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired registration token"})
+		return
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+		return
+	}
+
+	email := claims["email"].(string)
+
+	// Use session to get OTP and expiry
+	session := sessions.Default(c)
+	sessEmail := session.Get("registration_email")
+	if sessEmail == nil || sessEmail.(string) != email {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Session expired or email mismatch. Please register again."})
+		return
+	}
+	storedOTP := session.Get("registration_otp")
+	otpExpires := session.Get("registration_otp_expires")
+	if storedOTP == nil || otpExpires == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OTP session expired. Please register again."})
+		return
+	}
+	if time.Now().Unix() > otpExpires.(int64) {
+		// Check if registration token is still valid
+		regExpires := int64(claims["exp"].(float64))
+		if time.Now().Unix() > regExpires {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Registration expired. Please register again."})
+			return
+		}
+		// Resend new OTP
 		newOTP := generateOTP()
-		log.Println("OTP expired, sending new OTP:", newOTP)
-
-		// Update session with new OTP and expiration time
-		session.Set("otp", newOTP)
-		session.Set("otp_expires", time.Now().Add(time.Minute*1).Unix())
-
+		log.Printf("[OTP RESEND] Registration OTP sent to %s: %s", email, newOTP)
+		session.Set("registration_otp", newOTP)
+		session.Set("registration_otp_expires", time.Now().Add(1 * time.Minute).Unix())
 		if err := session.Save(); err != nil {
-			log.Printf("Failed to save session: %v", err)
+			log.Printf("Session save error: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save session"})
 			return
 		}
-
-		// Send new OTP via email
-		if err := utils.SendOTP(email.(string), newOTP); err != nil {
-			log.Printf("Failed to send OTP email: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+		if err := utils.SendOTP(email, newOTP); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resend OTP"})
 			return
 		}
-
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":      "OTP has expired",
-			"message":    "A new OTP has been sent to your email",
-			"email":      email,
-			"expires_in": "60 seconds",
+			"error":        "OTP expired. A new OTP has been sent to your email.",
+			"expires_in":   regExpires - time.Now().Unix(),
 		})
 		return
 	}
-
-	// Verify OTP
-	storedOTP := session.Get("otp").(string)
-	if storedOTP != req.OTP {
+	if storedOTP.(string) != req.OTP {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OTP"})
 		return
 	}
 
-	// Create user in database after successful verification
-	user := models.User{
-		Username:   session.Get("username").(string),
-		Email:      email.(string),
-		Password:   session.Get("password").(string),
-		FirstName:  session.Get("first_name").(string),
-		LastName:   session.Get("last_name").(string),
-		Phone:      session.Get("phone").(string),
-		IsVerified: true,
-	}
-
-	// Save user to database
-	if err := config.DB.Create(&user).Error; err != nil {
-		log.Printf("Database error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+	// Check if user already exists
+	var user models.User
+	if err := config.DB.Where("email = ?", email).First(&user).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "User already exists. Please login."})
 		return
 	}
 
-	// Generate JWT token
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.Model.ID,
+	// Create user
+	user = models.User{
+		Username:   claims["username"].(string),
+		Email:      email,
+		Password:   claims["password"].(string),
+		FirstName:  claims["first_name"].(string),
+		LastName:   claims["last_name"].(string),
+		Phone:      claims["phone"].(string),
+		IsVerified: true,
+	}
+	if err := config.DB.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user account"})
+		return
+	}
+
+	// Generate JWT token for login
+	loginToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": user.ID,
 		"email":   user.Email,
 		"exp":     time.Now().Add(time.Hour * 24).Unix(),
 	})
-
-	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	tokenString, err := loginToken.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	if err != nil {
 		log.Printf("Token generation error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
-
-	// Clear session after successful verification
-	session.Clear()
-	session.Save()
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Email verified and registration completed successfully",

@@ -71,8 +71,7 @@ type Book struct {
 	GenreID            uint      `json:"genre_id"`
 	Genre              Genre     `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
 	ImageURL           string    `json:"image_url"`
-	// Images field removed to prevent scan errors. Only ImageURL is used.
-	Images             string    `json:"images"`
+	BookImages         []BookImage `json:"images" gorm:"foreignKey:BookID"`
 	IsActive           bool      `json:"is_active" gorm:"default:true"`
 	IsFeatured         bool      `json:"is_featured" gorm:"default:false"`
 	Views              int       `json:"views" gorm:"default:0"`
