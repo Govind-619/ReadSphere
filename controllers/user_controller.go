@@ -706,6 +706,13 @@ func ResetPassword(c *gin.Context) {
 	})
 }
 
+func UserLogout(c *gin.Context) {
+	session := sessions.Default(c)
+	session.Clear()
+	session.Save()
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+}
+
 func AddReview(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Review added successfully"})
 }

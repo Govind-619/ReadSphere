@@ -18,11 +18,13 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			})
 		})
 		admin.POST("/login", controllers.AdminLogin)
-		admin.POST("/logout", controllers.AdminLogout)
 
 		// Protected admin routes
 		admin.Use(middleware.AdminAuthMiddleware())
 		{
+			// Logout (must be authenticated)
+			admin.POST("/logout", controllers.AdminLogout)
+
 			// Dashboard
 			admin.GET("/dashboard", controllers.GetDashboardOverview)
 
@@ -58,10 +60,11 @@ func initAdminRoutes(router *gin.RouterGroup) {
 
 			// Order management (admin)
 			admin.GET("/orders", controllers.AdminListOrders)
+			admin.GET("/orders/returns", controllers.AdminListReturnRequests)
 			admin.GET("/orders/:id", controllers.AdminGetOrderDetails)
 			admin.PUT("/orders/:id/status", controllers.AdminUpdateOrderStatus)
 			admin.POST("/orders/:id/return/accept", controllers.AdminAcceptReturn)
-admin.POST("/orders/:id/return/reject", controllers.AdminRejectReturn)
+			admin.POST("/orders/:id/return/reject", controllers.AdminRejectReturn)
 
 		}
 	}

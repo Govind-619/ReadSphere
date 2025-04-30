@@ -16,7 +16,7 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}
@@ -28,7 +28,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		})
 
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}
@@ -100,7 +100,7 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		// Extract token from Bearer header
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
 		if tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format. Use 'Bearer <token>'"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}
@@ -122,13 +122,13 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		})
 
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token: " + err.Error()})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}
 
 		if !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token is not valid"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}
@@ -144,7 +144,7 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		// Get admin ID from claims
 		adminID, ok := claims["admin_id"].(float64)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid admin ID in token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
 			c.Abort()
 			return
 		}

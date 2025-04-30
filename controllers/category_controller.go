@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -46,7 +47,7 @@ func GetCategories(c *gin.Context) {
 		return
 	}
 
-	query := config.DB.Model(&models.Category{})
+	query := config.DB.Model(&models.Category{}).Where("deleted_at IS NULL")
 
 	// Apply search with improved logging
 	if req.Search != "" {
@@ -93,8 +94,19 @@ func GetCategories(c *gin.Context) {
 		log.Printf("Category %d: ID=%d, Name=%s, CreatedAt=%v", i+1, category.ID, category.Name, category.CreatedAt)
 	}
 
+	// Return only id, name, description, blocked fields
+	var simpleCategories []gin.H
+	for _, cat := range categories {
+		simpleCategories = append(simpleCategories, gin.H{
+			"id":          cat.ID,
+			"name":        cat.Name,
+			"description": cat.Description,
+			"blocked":     cat.Blocked,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"categories": categories,
+		"categories": simpleCategories,
 		"pagination": gin.H{
 			"total":       total,
 			"page":        req.Page,
@@ -112,6 +124,13 @@ func CreateCategory(c *gin.Context) {
 	var category models.Category
 	if err := c.ShouldBindJSON(&category); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	// Check for duplicate category name (case-insensitive)
+	var existing models.Category
+	if err := config.DB.Where("LOWER(name) = ? AND deleted_at IS NULL", strings.ToLower(category.Name)).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Category with this name already exists"})
 		return
 	}
 
@@ -191,11 +210,127 @@ func ListBooksByCategory(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"category": category,
-		"books":    books,
-		"note":     "Prices are in Indian Rupees (INR)",
-	})
+	// Define a struct for admin and non-admin book responses
+	type AdminBook struct {
+		ID                 uint               `json:"id"`
+		Name               string             `json:"name"`
+		Description        string             `json:"description"`
+		Price              float64            `json:"price"`
+		OriginalPrice      float64            `json:"original_price"`
+		DiscountPercentage int                `json:"discount_percentage"`
+		Stock              int                `json:"stock"`
+		CategoryID         uint               `json:"category_id"`
+		GenreID            uint               `json:"genre_id"`
+		ImageURL           string             `json:"image_url"`
+		Images             []models.BookImage `json:"images"`
+		IsActive           bool               `json:"is_active"`
+		IsFeatured         bool               `json:"is_featured"`
+		Views              int                `json:"views"`
+		AverageRating      float64            `json:"average_rating"`
+		TotalReviews       int                `json:"total_reviews"`
+		Author             string             `json:"author"`
+		Publisher          string             `json:"publisher"`
+		ISBN               string             `json:"isbn"`
+		PublicationYear    int                `json:"publication_year"`
+		Pages              int                `json:"pages"`
+		Language           string             `json:"language"`
+		Format             string             `json:"format"`
+		Blocked            bool               `json:"blocked"`
+	}
+	type PublicBook struct {
+		ID                 uint               `json:"id"`
+		Name               string             `json:"name"`
+		Description        string             `json:"description"`
+		Price              float64            `json:"price"`
+		OriginalPrice      float64            `json:"original_price"`
+		DiscountPercentage int                `json:"discount_percentage"`
+		CategoryID         uint               `json:"category_id"`
+		GenreID            uint               `json:"genre_id"`
+		ImageURL           string             `json:"image_url"`
+		Images             []models.BookImage `json:"images"`
+		IsActive           bool               `json:"is_active"`
+		IsFeatured         bool               `json:"is_featured"`
+		Views              int                `json:"views"`
+		AverageRating      float64            `json:"average_rating"`
+		TotalReviews       int                `json:"total_reviews"`
+		Author             string             `json:"author"`
+		Publisher          string             `json:"publisher"`
+		ISBN               string             `json:"isbn"`
+		PublicationYear    int                `json:"publication_year"`
+		Pages              int                `json:"pages"`
+		Language           string             `json:"language"`
+		Format             string             `json:"format"`
+	}
+
+	_, isAdmin := c.Get("admin")
+	if isAdmin {
+		var adminBooks []AdminBook
+		for _, b := range books {
+			adminBooks = append(adminBooks, AdminBook{
+				ID:                 b.ID,
+				Name:               b.Name,
+				Description:        b.Description,
+				Price:              b.Price,
+				OriginalPrice:      b.OriginalPrice,
+				DiscountPercentage: b.DiscountPercentage,
+				Stock:              b.Stock,
+				CategoryID:         b.CategoryID,
+				GenreID:            b.GenreID,
+				ImageURL:           b.ImageURL,
+				Images:             b.BookImages,
+				IsActive:           b.IsActive,
+				IsFeatured:         b.IsFeatured,
+				Views:              b.Views,
+				AverageRating:      b.AverageRating,
+				TotalReviews:       b.TotalReviews,
+				Author:             b.Author,
+				Publisher:          b.Publisher,
+				ISBN:               b.ISBN,
+				PublicationYear:    b.PublicationYear,
+				Pages:              b.Pages,
+				Language:           b.Language,
+				Format:             b.Format,
+				Blocked:            b.Blocked,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"category": category,
+			"books":    adminBooks,
+			"note":     "Prices are in Indian Rupees (INR)",
+		})
+	} else {
+		var publicBooks []PublicBook
+		for _, b := range books {
+			publicBooks = append(publicBooks, PublicBook{
+				ID:                 b.ID,
+				Name:               b.Name,
+				Description:        b.Description,
+				Price:              b.Price,
+				OriginalPrice:      b.OriginalPrice,
+				DiscountPercentage: b.DiscountPercentage,
+				CategoryID:         b.CategoryID,
+				GenreID:            b.GenreID,
+				ImageURL:           b.ImageURL,
+				Images:             b.BookImages,
+				IsActive:           b.IsActive,
+				IsFeatured:         b.IsFeatured,
+				Views:              b.Views,
+				AverageRating:      b.AverageRating,
+				TotalReviews:       b.TotalReviews,
+				Author:             b.Author,
+				Publisher:          b.Publisher,
+				ISBN:               b.ISBN,
+				PublicationYear:    b.PublicationYear,
+				Pages:              b.Pages,
+				Language:           b.Language,
+				Format:             b.Format,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"category": category,
+			"books":    publicBooks,
+		})
+	}
 }
 
 // CreateDefaultCategory creates a default category if none exists

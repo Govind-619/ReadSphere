@@ -126,7 +126,7 @@ func GetUsers(c *gin.Context) {
 		req.Order = "desc"
 	}
 
-	query := config.DB.Model(&models.User{})
+	query := config.DB.Model(&models.User{}).Preload("Addresses")
 
 	// Apply search with improved logging
 	if req.Search != "" {

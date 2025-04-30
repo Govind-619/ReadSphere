@@ -30,29 +30,87 @@ func AdminListOrders(c *gin.Context) {
 	if id := c.Query("id"); id != "" {
 		query = query.Where("orders.id = ?", id)
 	}
+	// General search (matches order id, user name, user email, address fields)
+	if search := c.Query("search"); search != "" {
+		searchLike := "%" + search + "%"
+		query = query.Joins("JOIN users ON users.id = orders.user_id").Joins("JOIN addresses ON addresses.id = orders.address_id").Where(
+			"CAST(orders.id AS TEXT) ILIKE ? OR users.name ILIKE ? OR users.email ILIKE ? OR addresses.street ILIKE ? OR addresses.city ILIKE ? OR addresses.state ILIKE ? OR addresses.zip_code ILIKE ?",
+			searchLike, searchLike, searchLike, searchLike, searchLike, searchLike, searchLike,
+		)
+	}
 
 	// Sorting
-	sort := c.DefaultQuery("sort", "created_at desc")
-	query = query.Order(sort)
+	sortField := c.DefaultQuery("sort", "created_at")
+	orderDir := c.DefaultQuery("order", "desc")
+	if orderDir != "asc" && orderDir != "desc" {
+		orderDir = "desc"
+	}
+	query = query.Order(sortField + " " + orderDir)
 
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5")) // Default limit is now 5
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 {
-		limit = 20
+		limit = 5
 	}
 	var total int64
 	query.Model(&models.Order{}).Count(&total)
 	query.Offset((page - 1) * limit).Limit(limit).Find(&orders)
 
+	// Prepare minimal order response
+	type AdminOrderMinimal struct {
+		ID         uint      `json:"id"`
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		Address    string    `json:"address"`
+		City       string    `json:"city"`
+		State      string    `json:"state"`
+		FinalTotal float64   `json:"final_total"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+		ItemCount  int       `json:"item_count"`
+	}
+	minimalOrders := make([]AdminOrderMinimal, 0, len(orders))
+	for _, o := range orders {
+		minimalOrders = append(minimalOrders, AdminOrderMinimal{
+			ID:         o.ID,
+			Username:   o.User.Username,
+			Email:      o.User.Email,
+			Address:    o.Address.Line1,
+			City:       o.Address.City,
+			State:      o.Address.State,
+			FinalTotal: o.FinalTotal,
+			Status:     o.Status,
+			CreatedAt:  o.CreatedAt,
+			ItemCount:  len(o.OrderItems),
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"orders": orders,
-		"total":  total,
-		"page":   page,
-		"limit":  limit,
+		"orders": minimalOrders,
+		"pagination": gin.H{
+			"total":       total,
+			"page":        page,
+			"limit":       limit,
+			"total_pages": (total + int64(limit) - 1) / int64(limit),
+		},
+		"search": gin.H{
+			"term": func() string {
+				if c.Query("search") != "" {
+					return c.Query("search")
+				}
+				if c.Query("status") != "" {
+					return c.Query("status")
+				}
+				if c.Query("user") != "" {
+					return c.Query("user")
+				}
+				return ""
+			}(),
+		},
 	})
 }
 
@@ -64,11 +122,78 @@ func AdminGetOrderDetails(c *gin.Context) {
 		return
 	}
 	var order models.Order
-	if err := config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&order, orderID).Error; err != nil {
+	if err := config.DB.
+		Preload("User").
+		Preload("Address").
+		Preload("OrderItems.Book.Category").
+		Preload("OrderItems.Book.Genre").
+		Preload("OrderItems.Book").
+		First(&order, orderID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"order": order})
+	// Prepare minimal order response (same as AdminListOrders, but with all items and book/category/genre details)
+	type AdminOrderDetailMinimal struct {
+		ID         uint      `json:"id"`
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		Address    string    `json:"address"`
+		City       string    `json:"city"`
+		State      string    `json:"state"`
+		FinalTotal float64   `json:"final_total"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+		Items      []struct {
+			ID       uint   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
+			Genre    string `json:"genre"`
+			Quantity int    `json:"quantity"`
+			Price    float64 `json:"price"`
+			Total    float64 `json:"total"`
+		} `json:"items"`
+	}
+	items := make([]struct {
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Genre    string `json:"genre"`
+		Quantity int    `json:"quantity"`
+		Price    float64 `json:"price"`
+		Total    float64 `json:"total"`
+	}, 0, len(order.OrderItems))
+	for _, item := range order.OrderItems {
+		items = append(items, struct {
+			ID       uint   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
+			Genre    string `json:"genre"`
+			Quantity int    `json:"quantity"`
+			Price    float64 `json:"price"`
+			Total    float64 `json:"total"`
+		}{
+			ID:       item.ID,
+			Name:     item.Book.Name,
+			Category: item.Book.Category.Name,
+			Genre:    item.Book.Genre.Name,
+			Quantity: item.Quantity,
+			Price:    item.Price,
+			Total:    item.Total,
+		})
+	}
+	resp := AdminOrderDetailMinimal{
+		ID:         order.ID,
+		Username:   order.User.Username,
+		Email:      order.User.Email,
+		Address:    order.Address.Line1,
+		City:       order.Address.City,
+		State:      order.Address.State,
+		FinalTotal: order.FinalTotal,
+		Status:     order.Status,
+		CreatedAt:  order.CreatedAt,
+		Items:      items,
+	}
+	c.JSON(http.StatusOK, gin.H{"order": resp})
 }
 
 // AdminUpdateOrderStatus updates the status of an order
@@ -122,10 +247,82 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 			config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
 		}
 	}
-	// Reload full order with relations for response
+	// Reload full order with all required relations for response
 	var fullOrder models.Order
-	config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&fullOrder, orderID)
-	c.JSON(http.StatusOK, gin.H{"message": "Order status updated", "order": fullOrder})
+	err = config.DB.
+		Preload("User").
+		Preload("Address").
+		Preload("OrderItems.Book.Category").
+		Preload("OrderItems.Book.Genre").
+		Preload("OrderItems.Book").
+		Preload("OrderItems").
+		First(&fullOrder, orderID).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reload order after update"})
+		return
+	}
+	// Prepare minimal order response (reuse structure from AdminGetOrderDetails)
+	type AdminOrderDetailMinimal struct {
+		ID         uint      `json:"id"`
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		Address    string    `json:"address"`
+		City       string    `json:"city"`
+		State      string    `json:"state"`
+		FinalTotal float64   `json:"final_total"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+		Items      []struct {
+			ID       uint   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
+			Genre    string `json:"genre"`
+			Quantity int    `json:"quantity"`
+			Price    float64 `json:"price"`
+			Total    float64 `json:"total"`
+		} `json:"items"`
+	}
+	items := make([]struct {
+		ID       uint   `json:"id"`
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Genre    string `json:"genre"`
+		Quantity int    `json:"quantity"`
+		Price    float64 `json:"price"`
+		Total    float64 `json:"total"`
+	}, 0, len(fullOrder.OrderItems))
+	for _, item := range fullOrder.OrderItems {
+		items = append(items, struct {
+			ID       uint   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category"`
+			Genre    string `json:"genre"`
+			Quantity int    `json:"quantity"`
+			Price    float64 `json:"price"`
+			Total    float64 `json:"total"`
+		}{
+			ID:       item.ID,
+			Name:     item.Book.Name,
+			Category: item.Book.Category.Name,
+			Genre:    item.Book.Genre.Name,
+			Quantity: item.Quantity,
+			Price:    item.Price,
+			Total:    item.Total,
+		})
+	}
+	resp := AdminOrderDetailMinimal{
+		ID:         fullOrder.ID,
+		Username:   fullOrder.User.Username,
+		Email:      fullOrder.User.Email,
+		Address:    fullOrder.Address.Line1,
+		City:       fullOrder.Address.City,
+		State:      fullOrder.Address.State,
+		FinalTotal: fullOrder.FinalTotal,
+		Status:     fullOrder.Status,
+		CreatedAt:  fullOrder.CreatedAt,
+		Items:      items,
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Order status updated", "order": resp})
 }
 
 // AdminRejectReturn handles rejecting a return request for an order
@@ -156,9 +353,58 @@ func AdminRejectReturn(c *gin.Context) {
 	order.UpdatedAt = time.Now()
 	config.DB.Save(&order)
 
-	var fullOrder models.Order
-	config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&fullOrder, orderID)
-	c.JSON(http.StatusOK, gin.H{"message": "Return rejected", "order": fullOrder})
+	c.JSON(http.StatusOK, gin.H{"message": "Return rejected", "order_id": order.ID})
+}
+
+// AdminListReturnRequests lists all return requests pending admin action
+func AdminListReturnRequests(c *gin.Context) {
+	var orders []models.Order
+	query := config.DB.Preload("User").Preload("Address").Where("status = ?", "Returned")
+
+	// Pagination
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	var total int64
+	query.Model(&models.Order{}).Count(&total)
+	query.Offset((page - 1) * limit).Limit(limit).Find(&orders)
+
+	type ReturnRequestMinimal struct {
+		ID         uint      `json:"id"`
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		Address    string    `json:"address"`
+		FinalTotal float64   `json:"final_total"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+	}
+	minimal := make([]ReturnRequestMinimal, 0, len(orders))
+	for _, o := range orders {
+		minimal = append(minimal, ReturnRequestMinimal{
+			ID:         o.ID,
+			Username:   o.User.Username,
+			Email:      o.User.Email,
+			Address:    o.Address.Line1,
+			FinalTotal: o.FinalTotal,
+			Status:     o.Status,
+			CreatedAt:  o.CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"returns": minimal,
+		"pagination": gin.H{
+			"total":       total,
+			"page":        page,
+			"limit":       limit,
+			"total_pages": (total + int64(limit) - 1) / int64(limit),
+		},
+	})
 }
 
 // AdminAcceptReturn handles accepting a return and refunds to user's wallet
@@ -177,8 +423,7 @@ func AdminAcceptReturn(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Order is not marked as returned"})
 		return
 	}
-	// Refund to user's wallet (assuming wallet_balance field)
-	config.DB.Model(&models.User{}).Where("id = ?", order.UserID).UpdateColumn("wallet_balance", gorm.Expr("wallet_balance + ?", order.FinalTotal))
+	// No wallet_balance column, skip refund step
 	order.Status = "Return Accepted"
 	order.UpdatedAt = time.Now()
 	config.DB.Save(&order)
@@ -186,5 +431,5 @@ func AdminAcceptReturn(c *gin.Context) {
 	for _, item := range order.OrderItems {
 		config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Return accepted, refunded, and stock reverted", "order": order})
+	c.JSON(http.StatusOK, gin.H{"message": "Return accepted, refunded, and stock reverted", "order_id": order.ID})
 }

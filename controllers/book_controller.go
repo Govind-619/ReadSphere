@@ -113,9 +113,10 @@ func GetBooks(c *gin.Context) {
 	// Build the base query with only essential fields
 	query := `
 		SELECT 
-			id, name, author, price, image_url, is_active, stock
-		FROM books 
-		WHERE deleted_at IS NULL
+			books.id, books.name, books.author, books.price, books.image_url, books.is_active, books.stock
+		FROM books
+		JOIN categories ON books.category_id = categories.id
+		WHERE books.deleted_at IS NULL AND categories.deleted_at IS NULL
 	`
 
 	// Check if admin is in context - if not, only show active books
@@ -224,17 +225,17 @@ func GetBooks(c *gin.Context) {
 	// Add sorting
 	switch req.SortBy {
 	case "name":
-		query += fmt.Sprintf(" ORDER BY name %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.name %s", req.Order)
 	case "price":
-		query += fmt.Sprintf(" ORDER BY price %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.price %s", req.Order)
 	case "created_at":
-		query += fmt.Sprintf(" ORDER BY created_at %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.created_at %s", req.Order)
 	case "views":
-		query += fmt.Sprintf(" ORDER BY views %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.views %s", req.Order)
 	case "average_rating":
-		query += fmt.Sprintf(" ORDER BY average_rating %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.average_rating %s", req.Order)
 	default:
-		query += fmt.Sprintf(" ORDER BY created_at %s", req.Order)
+		query += fmt.Sprintf(" ORDER BY books.created_at %s", req.Order)
 	}
 
 	// Add pagination
@@ -257,7 +258,7 @@ func GetBooks(c *gin.Context) {
 	}
 
 	var categories []SimpleCategory
-	if err := config.DB.Raw("SELECT id, name, description FROM categories").Scan(&categories).Error; err != nil {
+	if err := config.DB.Raw("SELECT id, name, description FROM categories WHERE deleted_at IS NULL").Scan(&categories).Error; err != nil {
 		log.Printf("Failed to fetch categories: %v", err)
 		// Continue anyway, as we have the books data
 	}

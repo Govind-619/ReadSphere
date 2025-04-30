@@ -96,6 +96,9 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.POST("/orders/:id/return", controllers.ReturnOrder)
 		protected.GET("/orders/:id/invoice", controllers.DownloadInvoice)
 
+		// Logout
+		protected.POST("/logout", controllers.UserLogout)
+
 		// Reviews
 		protected.POST("/books/:id/review", controllers.AddReview)
 		protected.GET("/books/:id/reviews", controllers.GetBookReviews)
