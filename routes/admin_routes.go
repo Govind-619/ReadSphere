@@ -3,6 +3,7 @@ package routes
 import (
 	"github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -77,6 +78,21 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.GET("/coupons", controllers.GetCoupons)
 			admin.PUT("/coupons/:id", controllers.UpdateCoupon)
 			admin.DELETE("/coupons/:id", controllers.DeleteCoupon)
+
+			// Product Offer routes
+			adminOffers := admin.Group("/offers")
+			adminOffers.POST("/products", controllers.CreateProductOffer)
+			adminOffers.GET("/products", controllers.ListProductOffers)
+			adminOffers.PUT("/products/:id", controllers.UpdateProductOffer)
+			adminOffers.PATCH("/products/:id", controllers.UpdateProductOffer)
+			adminOffers.DELETE("/products/:id", controllers.DeleteProductOffer)
+
+			// Category Offer routes
+			adminOffers.POST("/categories", controllers.CreateCategoryOffer)
+			adminOffers.GET("/categories", controllers.ListCategoryOffers)
+			adminOffers.PUT("/categories/:id", controllers.UpdateCategoryOffer)
+			adminOffers.PATCH("/categories/:id", controllers.UpdateCategoryOffer)
+			adminOffers.DELETE("/categories/:id", controllers.DeleteCategoryOffer)
 
 		}
 	}

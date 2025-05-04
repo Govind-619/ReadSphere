@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bytes"
+	"github.com/Govind-619/ReadSphere/utils"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -69,17 +70,24 @@ func GetOrderDetails(c *gin.Context) {
 		return
 	}
 	// Prepare minimal items
-	items := make([]OrderBookDetailsMinimal, 0, len(order.OrderItems))
+	items := make([]gin.H, 0, len(order.OrderItems))
 	for _, item := range order.OrderItems {
-		items = append(items, OrderBookDetailsMinimal{
-			ItemID:     item.ID,
-			Name:       item.Book.Name,
-			Price:      item.Price,
-			CategoryID: item.Book.CategoryID,
-			GenreID:    item.Book.GenreID,
-			Quantity:   item.Quantity,
-			Discount:   item.Discount,
-			Total:      item.Total,
+		// Use CalculateOfferDetails for current book/price
+		finalUnitPrice, offerBreakdown, discountAmount, _ := utils.CalculateOfferDetails(item.Price, item.Book.ID, item.Book.CategoryID)
+		items = append(items, gin.H{
+			"item_id": item.ID,
+			"name": item.Book.Name,
+			"category_id": item.Book.CategoryID,
+			"genre_id": item.Book.GenreID,
+			"quantity": item.Quantity,
+			"original_price": item.Price,
+			"product_offer_percent": offerBreakdown.ProductOfferPercent,
+			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
+			"applied_offer_percent": offerBreakdown.AppliedOfferPercent,
+			"applied_offer_type": offerBreakdown.AppliedOfferType,
+			"discount_amount": fmt.Sprintf("%.2f", discountAmount*float64(item.Quantity)),
+			"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
+			"total": fmt.Sprintf("%.2f", item.Total),
 		})
 	}
 	// Prepare minimal user info
@@ -89,19 +97,19 @@ func GetOrderDetails(c *gin.Context) {
 		name = order.User.FirstName + " " + order.User.LastName
 		email = order.User.Email
 	}
-	resp := OrderDetailsMinimalResponse{
-		Email:          email,
-		Name:           name,
-		Address:        order.Address,
-		TotalAmount:    order.TotalAmount,
-		Discount:       order.Discount,
-		CouponDiscount: order.CouponDiscount,
-		CouponCode:     order.CouponCode,
-		Tax:            order.Tax,
-		FinalTotal:     order.FinalTotal,
-		PaymentMethod:  order.PaymentMethod,
-		Status:         order.Status,
-		Items:          items,
+	resp := gin.H{
+		"email":          email,
+		"name":           name,
+		"address":        order.Address,
+		"total_amount":   order.TotalAmount,
+		"discount":       order.Discount,
+		"coupon_discount": order.CouponDiscount,
+		"coupon_code":    order.CouponCode,
+		"tax":            order.Tax,
+		"final_total":    order.FinalTotal,
+		"payment_method": order.PaymentMethod,
+		"status":         order.Status,
+		"items":          items,
 	}
 	c.JSON(http.StatusOK, resp)
 }
@@ -431,14 +439,16 @@ func ReturnOrder(c *gin.Context) {
 	// Prepare minimal items
 	items := make([]OrderBookDetailsMinimal, 0, len(fullOrder.OrderItems))
 	for _, item := range fullOrder.OrderItems {
-		items = append(items, OrderBookDetailsMinimal{
+		finalUnitPrice := utils.ApplyOfferToPrice(item.Price, item.Discount)
+items = append(items, OrderBookDetailsMinimal{
 			ItemID:     item.ID,
 			Name:       item.Book.Name,
-			Price:      item.Price,
+			Price:      finalUnitPrice,
 			CategoryID: item.Book.CategoryID,
 			GenreID:    item.Book.GenreID,
 			Quantity:   item.Quantity,
 			Discount:   item.Discount,
+
 			Total:      item.Total,
 		})
 	}

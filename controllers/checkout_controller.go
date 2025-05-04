@@ -43,23 +43,28 @@ func GetCheckoutSummary(c *gin.Context) {
 		if err != nil || book == nil {
 			continue
 		}
-		itemPrice := book.Price
-		itemDiscount := 0.0
-		if book.OriginalPrice > book.Price {
-			itemDiscount = (book.OriginalPrice - book.Price) * float64(item.Quantity)
-		}
-		itemTotal := itemPrice * float64(item.Quantity)
+		// Sum both product and category offer percent for display and discount
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+		appliedOfferPercent := offerBreakdown.ProductOfferPercent + offerBreakdown.CategoryOfferPercent
+		discountAmount := (book.Price * appliedOfferPercent / 100) * float64(item.Quantity)
+		finalUnitPrice := book.Price - (book.Price * appliedOfferPercent / 100)
+		itemTotal := finalUnitPrice * float64(item.Quantity)
 		items = append(items, gin.H{
 			"book_id":    book.ID,
 			"name":       book.Name,
 			"image_url":  book.ImageURL,
 			"quantity":   item.Quantity,
-			"price":      itemPrice,
-			"discount":   itemDiscount,
-			"item_total": itemTotal,
+			"original_price": fmt.Sprintf("%.2f", book.Price),
+			"product_offer_percent": offerBreakdown.ProductOfferPercent,
+			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
+			"applied_offer_percent": appliedOfferPercent,
+			"applied_offer_type": "product+category",
+			"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
+			"item_total": fmt.Sprintf("%.2f", itemTotal),
+			"discount_amount": fmt.Sprintf("%.2f", discountAmount),
 		})
 		subtotal += itemTotal
-		discountTotal += itemDiscount
+		discountTotal += discountAmount
 	}
 	tax := 0.05 * subtotal // 5% GST
 	finalTotal := subtotal + tax - discountTotal
@@ -142,22 +147,23 @@ func PlaceOrder(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available or insufficient stock for book_id " + strconv.FormatUint(uint64(item.BookID), 10)})
 			return
 		}
-		itemPrice := book.Price
-		itemDiscount := 0.0
-		if book.OriginalPrice > book.Price {
-			itemDiscount = (book.OriginalPrice - book.Price) * float64(item.Quantity)
-		}
-		itemTotal := itemPrice * float64(item.Quantity)
+		// Sum both product and category offer percent for display and discount
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+		appliedOfferPercent := offerBreakdown.ProductOfferPercent + offerBreakdown.CategoryOfferPercent
+		discountAmount := (book.Price * appliedOfferPercent / 100) * float64(item.Quantity)
+		finalUnitPrice := book.Price - (book.Price * appliedOfferPercent / 100)
+		itemTotal := finalUnitPrice * float64(item.Quantity)
 		orderItems = append(orderItems, models.OrderItem{
 			BookID:   book.ID,
 			Book:     *book,
 			Quantity: item.Quantity,
-			Price:    itemPrice,
-			Discount: itemDiscount,
+			Price:    finalUnitPrice,
+			Discount: discountAmount,
 			Total:    itemTotal,
+			// Optionally, you can add offer fields to OrderItem model if you want to persist offer details
 		})
 		subtotal += itemTotal
-		discountTotal += itemDiscount
+		discountTotal += discountAmount
 	}
 
 	// Apply coupon discount if provided
@@ -249,7 +255,7 @@ func PlaceOrder(c *gin.Context) {
 	}
 
 	tax := 0.05 * subtotal
-	finalTotal := subtotal + tax - discountTotal - couponDiscount
+	finalTotal := subtotal + tax - couponDiscount
 
 	// Check if using wallet payment method
 	if req.PaymentMethod == "wallet" {

@@ -112,14 +112,18 @@ func AddToCart(c *gin.Context) {
 		subtotal := 0.0
 		for _, item := range cartItems {
 			book := item.Book
-			itemSubtotal := book.Price * float64(item.Quantity)
+			discountPercent, _ := utils.GetBestOfferForBook(book.ID, book.CategoryID)
+			finalUnitPrice := utils.ApplyOfferToPrice(book.Price, discountPercent)
+			itemSubtotal := finalUnitPrice * float64(item.Quantity)
 			subtotal += itemSubtotal
 			minimalCartItems = append(minimalCartItems, gin.H{
 				"book_id":   book.ID,
 				"name":      book.Name,
 				"image_url": book.ImageURL,
 				"quantity":  item.Quantity,
-				"price":     fmt.Sprintf("%.2f", book.Price),
+				"original_price": fmt.Sprintf("%.2f", book.Price),
+				"discount_percent": discountPercent,
+				"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
 				"total":     fmt.Sprintf("%.2f", itemSubtotal),
 				"stock_status": func() string {
 					if book.Stock < item.Quantity {
@@ -250,17 +254,31 @@ func GetCart(c *gin.Context) {
 	}
 	var minimalCartItems []gin.H
 	subtotal := 0.0
+	totalDiscount := 0.0
 	for _, item := range cartItems {
 		book := item.Book
-		itemSubtotal := book.Price * float64(item.Quantity)
-		subtotal += itemSubtotal
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+		// Sum both product and category offer percent for display and discount
+		appliedOfferPercent := offerBreakdown.ProductOfferPercent + offerBreakdown.CategoryOfferPercent
+		// Calculate discount using the sum
+		discountAmount := (book.Price * appliedOfferPercent / 100) * float64(item.Quantity)
+		finalUnitPrice := book.Price - (book.Price * appliedOfferPercent / 100)
+		itemTotal := finalUnitPrice * float64(item.Quantity)
+		subtotal += itemTotal
+		totalDiscount += discountAmount
 		minimalCartItems = append(minimalCartItems, gin.H{
 			"book_id":   book.ID,
 			"name":      book.Name,
 			"image_url": book.ImageURL,
 			"quantity":  item.Quantity,
-			"price":     fmt.Sprintf("%.2f", book.Price),
-			"total":     fmt.Sprintf("%.2f", itemSubtotal),
+			"original_price": fmt.Sprintf("%.2f", book.Price),
+			"product_offer_percent": offerBreakdown.ProductOfferPercent,
+			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
+			"applied_offer_percent": appliedOfferPercent,
+			"applied_offer_type": "product+category",
+			"discount_amount": fmt.Sprintf("%.2f", discountAmount),
+			"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
+			"item_total": fmt.Sprintf("%.2f", itemTotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -278,7 +296,8 @@ func GetCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"cart":         minimalCartItems,
 		"subtotal":     fmt.Sprintf("%.2f", subtotal),
-		"total":        fmt.Sprintf("%.2f", subtotal), // Add discounts, shipping, taxes if/when needed
+		"total_discount": fmt.Sprintf("%.2f", totalDiscount),
+		"total":        fmt.Sprintf("%.2f", subtotal), // Add shipping, taxes if/when needed
 		"can_checkout": canCheckout,
 	})
 }

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"fmt"
+	"github.com/Govind-619/ReadSphere/utils"
 	"log"
 	"net/http"
 	"strconv"
@@ -212,12 +213,14 @@ func ListBooksByCategory(c *gin.Context) {
 
 	// Define a struct for admin and non-admin book responses
 	type AdminBook struct {
+	FinalPrice float64 `json:"final_price"`
+	DiscountPercentage float64 `json:"discount_percent"`
 		ID                 uint               `json:"id"`
 		Name               string             `json:"name"`
 		Description        string             `json:"description"`
 		Price              float64            `json:"price"`
 		OriginalPrice      float64            `json:"original_price"`
-		DiscountPercentage int                `json:"discount_percentage"`
+
 		Stock              int                `json:"stock"`
 		CategoryID         uint               `json:"category_id"`
 		GenreID            uint               `json:"genre_id"`
@@ -238,12 +241,14 @@ func ListBooksByCategory(c *gin.Context) {
 		Blocked            bool               `json:"blocked"`
 	}
 	type PublicBook struct {
+	FinalPrice float64 `json:"final_price"`
+	DiscountPercentage float64 `json:"discount_percent"`
 		ID                 uint               `json:"id"`
 		Name               string             `json:"name"`
 		Description        string             `json:"description"`
 		Price              float64            `json:"price"`
 		OriginalPrice      float64            `json:"original_price"`
-		DiscountPercentage int                `json:"discount_percentage"`
+
 		CategoryID         uint               `json:"category_id"`
 		GenreID            uint               `json:"genre_id"`
 		ImageURL           string             `json:"image_url"`
@@ -266,13 +271,15 @@ func ListBooksByCategory(c *gin.Context) {
 	if isAdmin {
 		var adminBooks []AdminBook
 		for _, b := range books {
+			discountPercent, _ := utils.GetBestOfferForBook(b.ID, b.CategoryID)
+			finalPrice := utils.ApplyOfferToPrice(b.Price, discountPercent)
 			adminBooks = append(adminBooks, AdminBook{
 				ID:                 b.ID,
 				Name:               b.Name,
 				Description:        b.Description,
 				Price:              b.Price,
 				OriginalPrice:      b.OriginalPrice,
-				DiscountPercentage: b.DiscountPercentage,
+				DiscountPercentage: discountPercent,
 				Stock:              b.Stock,
 				CategoryID:         b.CategoryID,
 				GenreID:            b.GenreID,
@@ -291,6 +298,7 @@ func ListBooksByCategory(c *gin.Context) {
 				Language:           b.Language,
 				Format:             b.Format,
 				Blocked:            b.Blocked,
+				FinalPrice:         finalPrice,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -301,13 +309,15 @@ func ListBooksByCategory(c *gin.Context) {
 	} else {
 		var publicBooks []PublicBook
 		for _, b := range books {
+			discountPercent, _ := utils.GetBestOfferForBook(b.ID, b.CategoryID)
+			finalPrice := utils.ApplyOfferToPrice(b.Price, discountPercent)
 			publicBooks = append(publicBooks, PublicBook{
 				ID:                 b.ID,
 				Name:               b.Name,
 				Description:        b.Description,
 				Price:              b.Price,
 				OriginalPrice:      b.OriginalPrice,
-				DiscountPercentage: b.DiscountPercentage,
+				DiscountPercentage: discountPercent,
 				CategoryID:         b.CategoryID,
 				GenreID:            b.GenreID,
 				ImageURL:           b.ImageURL,
@@ -324,6 +334,7 @@ func ListBooksByCategory(c *gin.Context) {
 				Pages:              b.Pages,
 				Language:           b.Language,
 				Format:             b.Format,
+				FinalPrice:         finalPrice,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{
