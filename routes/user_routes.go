@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Govind-619/ReadSphere/controllers"
+	paymentcontroller "github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -72,6 +73,13 @@ func initUserRoutes(router *gin.RouterGroup) {
 	protected := router.Group("/user")
 	protected.Use(middleware.AuthMiddleware())
 	{
+		// Payment Integration (Razorpay)
+		protected.POST("/checkout/payment/initiate", paymentcontroller.InitiateRazorpayPayment)
+		protected.POST("/checkout/payment/verify", paymentcontroller.VerifyRazorpayPayment)
+		protected.GET("/checkout/payment/methods", paymentcontroller.GetPaymentMethods)
+		// Test payment simulation (only in development)
+		protected.GET("/checkout/payment/simulate", paymentcontroller.SimulatePayment)
+
 		// Cart operations
 		protected.POST("/cart/add", controllers.AddToCart)
 		protected.GET("/cart", controllers.GetCart)
@@ -102,5 +110,16 @@ func initUserRoutes(router *gin.RouterGroup) {
 		// Reviews
 		protected.POST("/books/:id/review", controllers.AddReview)
 		protected.GET("/books/:id/reviews", controllers.GetBookReviews)
+
+		// Coupon routes
+		protected.POST("/coupons/apply", controllers.ApplyCoupon)
+		protected.POST("/coupons/remove", controllers.RemoveCoupon)
+		protected.GET("/coupons", controllers.GetCoupons)
+
+		// Wallet routes
+		protected.GET("/wallet", controllers.GetWalletBalance)
+		protected.GET("/wallet/transactions", controllers.GetWalletTransactions)
+		protected.POST("/wallet/topup/initiate", controllers.InitiateWalletTopup)
+		protected.POST("/wallet/topup/verify", controllers.VerifyWalletTopup)
 	}
 }

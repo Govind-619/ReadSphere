@@ -24,23 +24,25 @@ type OrderBookDetailsMinimal struct {
 }
 
 type OrderDetailsMinimalResponse struct {
-	Email         string                  `json:"email"`
-	Name          string                  `json:"name"`
-	Address       models.Address          `json:"address"`
-	TotalAmount   float64                 `json:"total_amount"`
-	Discount      float64                 `json:"discount"`
-	Tax           float64                 `json:"tax"`
-	FinalTotal    float64                 `json:"final_total"`
-	PaymentMethod string                  `json:"payment_method"`
-	Status        string                  `json:"status"`
-	Items         []OrderBookDetailsMinimal `json:"items"`
+	Email          string                    `json:"email"`
+	Name           string                    `json:"name"`
+	Address        models.Address            `json:"address"`
+	TotalAmount    float64                   `json:"total_amount"`
+	Discount       float64                   `json:"discount"`
+	CouponDiscount float64                   `json:"coupon_discount"`
+	CouponCode     string                    `json:"coupon_code,omitempty"`
+	Tax            float64                   `json:"tax"`
+	FinalTotal     float64                   `json:"final_total"`
+	PaymentMethod  string                    `json:"payment_method"`
+	Status         string                    `json:"status"`
+	Items          []OrderBookDetailsMinimal `json:"items"`
 }
 
 type PlaceOrderMinimalResponse struct {
-	Username      string                 `json:"username"`
-	Email         string                 `json:"email"`
-	Address       models.Address         `json:"address"`
-	Books         []OrderBookMinimal     `json:"books"`
-	RedirectURL   string                 `json:"redirect_url"`
-	ThankYouPage  map[string]interface{} `json:"thank_you_page"`
+	Username     string                 `json:"username"`
+	Email        string                 `json:"email"`
+	Address      models.Address         `json:"address"`
+	Books        []OrderBookMinimal     `json:"books"`
+	RedirectURL  string                 `json:"redirect_url"`
+	ThankYouPage map[string]interface{} `json:"thank_you_page"`
 }

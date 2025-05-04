@@ -24,6 +24,7 @@ type User struct {
 	OTPExpiresAt time.Time `json:"-"`
 	LastLoginAt  time.Time `json:"last_login_at"`
 	GoogleID     string    `gorm:"unique;default:null" json:"google_id"`
+	Wallet       Wallet    `json:"wallet,omitempty" gorm:"foreignKey:UserID"`
 
 	Addresses []Address `json:"addresses" gorm:"foreignKey:UserID"`
 }
@@ -59,33 +60,33 @@ type Genre struct {
 // Book represents a book in the system
 type Book struct {
 	gorm.Model
-	Name               string    `json:"name"`
-	Description        string    `json:"description"`
-	Price              float64   `json:"price"`
-	OriginalPrice      float64   `json:"original_price"`
-	DiscountPercentage int       `json:"discount_percentage"`
-	DiscountEndDate    time.Time `json:"discount_end_date"`
-	Stock              int       `json:"stock"`
-	CategoryID         uint      `json:"category_id"`
-	Category           Category  `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
-	GenreID            uint      `json:"genre_id"`
-	Genre              Genre     `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
-	ImageURL           string    `json:"image_url"`
+	Name               string      `json:"name"`
+	Description        string      `json:"description"`
+	Price              float64     `json:"price"`
+	OriginalPrice      float64     `json:"original_price"`
+	DiscountPercentage int         `json:"discount_percentage"`
+	DiscountEndDate    time.Time   `json:"discount_end_date"`
+	Stock              int         `json:"stock"`
+	CategoryID         uint        `json:"category_id"`
+	Category           Category    `json:"category,omitempty" gorm:"foreignKey:CategoryID"`
+	GenreID            uint        `json:"genre_id"`
+	Genre              Genre       `json:"genre,omitempty" gorm:"foreignKey:GenreID"`
+	ImageURL           string      `json:"image_url"`
 	BookImages         []BookImage `json:"images" gorm:"foreignKey:BookID"`
-	IsActive           bool      `json:"is_active" gorm:"default:true"`
-	IsFeatured         bool      `json:"is_featured" gorm:"default:false"`
-	Views              int       `json:"views" gorm:"default:0"`
-	Reviews            []Review  `json:"reviews,omitempty"`
-	AverageRating      float64   `json:"average_rating" gorm:"default:0"`
-	TotalReviews       int       `json:"total_reviews" gorm:"default:0"`
-	Author             string    `json:"author"`
-	Publisher          string    `json:"publisher"`
-	ISBN               string    `json:"isbn" gorm:"uniqueIndex"`
-	PublicationYear    int       `json:"publication_year"`
-	Pages              int       `json:"pages"`
-	Language           string    `json:"language" gorm:"default:'English'"`
-	Format             string    `json:"format" gorm:"default:'Paperback'"`
-	Blocked            bool      `json:"blocked" gorm:"default:false"`
+	IsActive           bool        `json:"is_active" gorm:"default:true"`
+	IsFeatured         bool        `json:"is_featured" gorm:"default:false"`
+	Views              int         `json:"views" gorm:"default:0"`
+	Reviews            []Review    `json:"reviews,omitempty"`
+	AverageRating      float64     `json:"average_rating" gorm:"default:0"`
+	TotalReviews       int         `json:"total_reviews" gorm:"default:0"`
+	Author             string      `json:"author"`
+	Publisher          string      `json:"publisher"`
+	ISBN               string      `json:"isbn" gorm:"uniqueIndex"`
+	PublicationYear    int         `json:"publication_year"`
+	Pages              int         `json:"pages"`
+	Language           string      `json:"language" gorm:"default:'English'"`
+	Format             string      `json:"format" gorm:"default:'Paperback'"`
+	Blocked            bool        `json:"blocked" gorm:"default:false"`
 }
 
 // Review represents a book review

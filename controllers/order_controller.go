@@ -90,21 +90,23 @@ func GetOrderDetails(c *gin.Context) {
 		email = order.User.Email
 	}
 	resp := OrderDetailsMinimalResponse{
-		Email:         email,
-		Name:          name,
-		Address:       order.Address,
-		TotalAmount:   order.TotalAmount,
-		Discount:      order.Discount,
-		Tax:           order.Tax,
-		FinalTotal:    order.FinalTotal,
-		PaymentMethod: order.PaymentMethod,
-		Status:        order.Status,
-		Items:         items,
+		Email:          email,
+		Name:           name,
+		Address:        order.Address,
+		TotalAmount:    order.TotalAmount,
+		Discount:       order.Discount,
+		CouponDiscount: order.CouponDiscount,
+		CouponCode:     order.CouponCode,
+		Tax:            order.Tax,
+		FinalTotal:     order.FinalTotal,
+		PaymentMethod:  order.PaymentMethod,
+		Status:         order.Status,
+		Items:          items,
 	}
 	c.JSON(http.StatusOK, resp)
 }
 
-// CancelOrder cancels an entire order, restores stock, and records reason
+// CancelOrder cancels an entire order, restores stock, processes wallet refund and records reason
 func CancelOrder(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
@@ -112,36 +114,155 @@ func CancelOrder(c *gin.Context) {
 		return
 	}
 	user := userVal.(models.User)
-	orderID, err := strconv.Atoi(c.Param("id"))
+
+	// Parse order ID - supporting both string and uint formats
+	orderIDStr := c.Param("id")
+	orderID, err := strconv.ParseUint(orderIDStr, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID"})
 		return
 	}
+
+	// Parse cancellation reason
 	var req struct {
-		Reason string `json:"reason"`
+		Reason string `json:"reason" binding:"required"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Reason is required"})
+		return
+	}
+
+	// Get the order with all items
 	var order models.Order
 	if err := config.DB.Preload("OrderItems").Where("id = ? AND user_id = ?", orderID, user.ID).First(&order).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
-	if order.Status == "Cancelled" {
+
+	// Check if order is already cancelled
+	if order.Status == models.OrderStatusCancelled {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Order already cancelled"})
 		return
 	}
-	// Restore stock
-	for _, item := range order.OrderItems {
-		config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
+
+	// Check if order can be cancelled based on status
+	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusProcessing {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Order cannot be cancelled at this stage"})
+		return
 	}
-	order.Status = "Cancelled"
+
+	// Start a database transaction
+	tx := config.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+
+	// Restore stock for each book
+	for _, item := range order.OrderItems {
+		if err := tx.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to restore book stock"})
+			return
+		}
+	}
+
+	// Update order status and details
+	order.Status = models.OrderStatusCancelled
+	order.CancellationReason = req.Reason
+	order.RefundStatus = "pending"
+	order.RefundAmount = order.FinalTotal
+	order.RefundedToWallet = true
 	order.UpdatedAt = time.Now()
-	config.DB.Save(&order)
-	// Optionally, save cancel reason in a dedicated field or table
-	c.JSON(http.StatusOK, gin.H{"message": "Order cancelled"})
+
+	if err := tx.Save(&order).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order"})
+		return
+	}
+
+	// Only process refund if payment was not COD
+	var walletRefundProcessed bool
+	var wallet *models.Wallet
+	var transaction *models.WalletTransaction
+
+	if order.PaymentMethod != "COD" && order.PaymentMethod != "cod" {
+		// Get or create wallet
+		wallet, err = getOrCreateWallet(user.ID)
+		if err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
+			return
+		}
+
+		// Create a wallet transaction
+		orderIDUint := uint(orderID)
+		reference := fmt.Sprintf("REFUND-ORDER-%d", orderID)
+		description := fmt.Sprintf("Refund for cancelled order #%d", orderID)
+
+		transaction, err = createWalletTransaction(wallet.ID, order.FinalTotal, models.TransactionTypeCredit, description, &orderIDUint, reference)
+		if err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction"})
+			return
+		}
+
+		// Update wallet balance
+		if err := updateWalletBalance(wallet.ID, order.FinalTotal, models.TransactionTypeCredit); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update wallet balance"})
+			return
+		}
+
+		// Update order refund status
+		now := time.Now()
+		order.RefundStatus = "completed"
+		order.RefundedAt = &now
+
+		if err := tx.Save(&order).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order refund status"})
+			return
+		}
+
+		walletRefundProcessed = true
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+	// Prepare response based on whether wallet refund was processed
+	if walletRefundProcessed {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Order cancelled and refunded to wallet",
+			"order": gin.H{
+				"id":            order.ID,
+				"status":        order.Status,
+				"refund_amount": fmt.Sprintf("%.2f", order.RefundAmount),
+				"refund_status": order.RefundStatus,
+				"refunded_at":   order.RefundedAt,
+			},
+			"transaction": transaction,
+			"wallet": gin.H{
+				"balance": fmt.Sprintf("%.2f", wallet.Balance),
+			},
+		})
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Order cancelled",
+			"order": gin.H{
+				"id":     order.ID,
+				"status": order.Status,
+			},
+		})
+	}
 }
 
-// CancelOrderItem cancels a single item in an order
+// CancelOrderItem submits a request to cancel a single item in an order
+// This requires admin approval before processing the refund
 func CancelOrderItem(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
@@ -162,11 +283,24 @@ func CancelOrderItem(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Reason string `json:"reason"`
+		Reason string `json:"reason" binding:"required"`
 	}
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Reason is required for item cancellation"})
+		return
+	}
+
+	// Start a transaction to ensure all operations are atomic
+	tx := config.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to begin transaction"})
+		return
+	}
+
+	// Get order item
 	var item models.OrderItem
-	if err := config.DB.Where("id = ? AND order_id = ?", itemID, orderID).First(&item).Error; err != nil {
+	if err := tx.Where("id = ? AND order_id = ?", itemID, orderID).First(&item).Error; err != nil {
+		tx.Rollback()
 		// Debug: list all items for this order
 		var items []models.OrderItem
 		config.DB.Where("order_id = ?", orderID).Find(&items)
@@ -175,30 +309,76 @@ func CancelOrderItem(c *gin.Context) {
 			itemIDs[i] = it.ID
 		}
 		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Order item not found",
-			"order_id": orderID,
-			"item_id": itemID,
+			"error":              "Order item not found",
+			"order_id":           orderID,
+			"item_id":            itemID,
 			"item_ids_for_order": itemIDs,
 		})
 		return
 	}
+
 	// Fetch the order and check ownership
 	var order models.Order
-	if err := config.DB.First(&order, orderID).Error; err != nil {
+	if err := tx.First(&order, orderID).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
+
 	if order.UserID != user.ID {
+		tx.Rollback()
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not authorized to cancel items in this order"})
 		return
 	}
-	// Restore stock
-	config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
-	config.DB.Delete(&item)
-	c.JSON(http.StatusOK, gin.H{"message": "Order item cancelled"})
+
+	// Check order status - only allow if status is "Placed"
+	if order.Status != "Placed" && order.Status != models.OrderStatusPlaced {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Item cancellation is only allowed when order status is 'Placed'"})
+		return
+	}
+
+	// Mark the item for cancellation/return instead of deleting it
+	// Add a status field to track the item's cancellation status
+	item.CancellationRequested = true
+	item.CancellationReason = req.Reason
+	item.CancellationStatus = "Pending" // Will be "Approved" or "Rejected" by admin
+
+	if err := tx.Save(&item).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order item"})
+		return
+	}
+
+	// Update order status to indicate item cancellation request
+	order.HasItemCancellationRequests = true
+
+	if err := tx.Save(&order).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order status"})
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to submit item cancellation request"})
+		return
+	}
+
+	// Prepare response
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Item cancellation request submitted successfully",
+		"note":    "Your request to cancel this item is pending admin approval. You will receive a refund once approved.",
+		"item": gin.H{
+			"id":                  item.ID,
+			"cancellation_status": "Pending",
+			"cancellation_reason": req.Reason,
+		},
+	})
 }
 
-// ReturnOrder allows user to return an order if delivered, reason mandatory
+// ReturnOrder allows user to request a return for a delivered order
+// The request requires admin approval before processing
 func ReturnOrder(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
@@ -223,14 +403,28 @@ func ReturnOrder(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
 		return
 	}
-	if order.Status != "Delivered" {
+	if order.Status != models.OrderStatusDelivered {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Only delivered orders can be returned"})
 		return
 	}
-	order.Status = "Returned"
+
+	// Check if return period has expired (e.g., 7 days)
+	returnPeriod := 7 * 24 * time.Hour
+	if time.Since(order.UpdatedAt) > returnPeriod {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Return period has expired"})
+		return
+	}
+
+	// Set status to return requested instead of immediately returned
+	order.Status = models.OrderStatusReturnRequested
+	order.ReturnReason = req.Reason
 	order.UpdatedAt = time.Now()
-	config.DB.Save(&order)
-	// Optionally, save return reason
+
+	if err := config.DB.Save(&order).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order"})
+		return
+	}
+
 	// Reload order with all relations for response
 	var fullOrder models.Order
 	config.DB.Preload("OrderItems.Book").Preload("User").Preload("Address").First(&fullOrder, order.ID)
@@ -267,7 +461,11 @@ func ReturnOrder(c *gin.Context) {
 		Status:        fullOrder.Status,
 		Items:         items,
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Order returned", "order": resp})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Return request submitted successfully",
+		"order":   resp,
+		"note":    "Your return request has been submitted. Our team will review it and process accordingly.",
+	})
 }
 
 // DownloadInvoice generates and returns a PDF invoice for the order

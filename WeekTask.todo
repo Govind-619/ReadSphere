@@ -22,6 +22,33 @@ Product Management:
 ✔ Multi-image upload (minimum 3 images via a single file field) @done (4/5/2025, 3:26:08 PM)
 ✘ Image cropping and resizing before upload @cancelled (4/5/2025, 10:28:22 AM)
 
+Offer Management:
+
+Implement product-specific offers.
+Implement category-specific offers.
+Handle overlap between product and category offers (apply larger offer).
+Implement referral offer system:
+Referral via token URL (send invite link, generate coupon).
+Referral via referral code (store during signup, generate coupon).
+
+Coupon Management:
+
+Create new coupons with validations.
+Delete existing coupons.
+
+Sales Reporting:
+
+Generate sales report:
+ Custom date range
+ 1 Day / Week / Month filters
+ Include discount and coupon deductions
+ Show overall sales count
+ Show overall order amount
+ Show overall discount amount
+
+Download sales report as PDF.
+Download sales report as Excel.
+
 User Side:
     
 ✔ Home Page Design @done (4/2/2025, 11:36:51 AM)
@@ -44,4 +71,40 @@ Product Details Page:
 ✘ Detailed product view with image zoom @cancelled (4/5/2025, 3:26:43 PM)
 ✔ Include breadcrumbs, ratings, price, discounts, reviews, stock status, product highlights/specs, and related product recommendations @done (4/8/2025, 2:37:17 PM)
 ✔ Redirect to the product listing page if a product is blocked or unavailable (e.g., when clicking "Add to Cart") @done (4/8/2025, 5:47:33 PM)
+
+Online Payment Integration:
+
+Integrate Razorpay or PayPal.
+Redirect to success page after successful payment (thank you statement, illustration, buttons: "Order Details", "Continue Shopping").
+Redirect to failure page after payment failure (illustration, failure message, "Retry Payment", "Order Details").
+
+Order Management:
+
+Cancel entire order or specific products (optional reason).
+Increment stock upon cancellation.
+Return order after delivery (mandatory reason for return).
+
+Coupon Management:
+
+Apply coupon on checkout page.
+Remove coupon on checkout page.
+Prevent multiple applications of the same coupon.
+Display breakdown of grand total including coupon discount.
+
+Product Search and Filtering:
+
+Implement product search functionality.
+Implement category-based filtering.
+
+Wishlist Management:
+
+Add product to wishlist (from listing and product detail pages).
+Remove product from wishlist.
+Move product from wishlist to cart and remove from wishlist.
+
+Wallet Management:
+
+Implement wallet system for canceled and returned orders.
+Refund amount to wallet after admin confirmation for returns.
+Refund amount to wallet directly for canceled orders.
 

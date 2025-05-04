@@ -35,6 +35,7 @@ func ConnectDatabase() {
 		&models.Review{},
 		&models.PasswordHistory{},
 		&models.UserOTP{},
+		&models.UserActiveCoupon{},
 		// Future models to be added:
 		// &models.Cart{},
 		// &models.Wishlist{},
@@ -69,5 +70,13 @@ func removeISBNUniqueConstraint() {
 		if err != nil {
 			log.Printf("Failed to remove ISBN constraint: %v", err)
 		}
+	}
+}
+
+// EnsureUserActiveCouponTableExists makes sure the UserActiveCoupon table is created
+func EnsureUserActiveCouponTableExists() {
+	// Check if table exists, if not, create it
+	if !DB.Migrator().HasTable(&models.UserActiveCoupon{}) {
+		DB.Migrator().CreateTable(&models.UserActiveCoupon{})
 	}
 }

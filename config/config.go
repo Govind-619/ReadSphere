@@ -117,6 +117,11 @@ func InitDB() {
 		&models.OrderItem{},
 		&models.Address{},
 		&models.BookImage{},
+		&models.Coupon{},
+		&models.UserCoupon{},
+		&models.UserActiveCoupon{},
+		&models.Wallet{},
+		&models.WalletTransaction{},
 	)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to migrate database: %v", err))
@@ -130,5 +135,26 @@ func InitDB() {
 	`).Error
 	if err != nil {
 		panic(fmt.Sprintf("Failed to update google_id column: %v", err))
+	}
+
+	// Drop existing index if it exists
+	err = DB.Exec(`DROP INDEX IF EXISTS idx_coupons_code_lower`).Error
+	if err != nil {
+		panic(fmt.Sprintf("Failed to drop existing index: %v", err))
+	}
+
+	// Update existing coupon codes to uppercase
+	err = DB.Exec(`UPDATE coupons SET code = UPPER(code) WHERE code != UPPER(code)`).Error
+	if err != nil {
+		panic(fmt.Sprintf("Failed to update existing coupon codes: %v", err))
+	}
+
+	// Create case-insensitive unique index on coupon code
+	err = DB.Exec(`
+		CREATE UNIQUE INDEX idx_coupons_code_lower 
+		ON coupons (LOWER(code))
+	`).Error
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create case-insensitive index: %v", err))
 	}
 }

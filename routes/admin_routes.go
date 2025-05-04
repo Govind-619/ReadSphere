@@ -63,8 +63,20 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.GET("/orders/returns", controllers.AdminListReturnRequests)
 			admin.GET("/orders/:id", controllers.AdminGetOrderDetails)
 			admin.PUT("/orders/:id/status", controllers.AdminUpdateOrderStatus)
-			admin.POST("/orders/:id/return/accept", controllers.AdminAcceptReturn)
-			admin.POST("/orders/:id/return/reject", controllers.AdminRejectReturn)
+
+			// Return and refund management
+			admin.POST("/orders/:id/return/approve", controllers.ApproveOrderReturn)
+			admin.POST("/orders/:id/return/reject", controllers.RejectOrderReturn)
+
+			// Item cancellation management
+			admin.GET("/orders/item-cancellations", controllers.AdminListItemCancellationRequests)
+			admin.POST("/orders/:id/items/:item_id/review", controllers.AdminReviewItemCancellation)
+
+			// Coupon management
+			admin.POST("/coupons", controllers.CreateCoupon)
+			admin.GET("/coupons", controllers.GetCoupons)
+			admin.PUT("/coupons/:id", controllers.UpdateCoupon)
+			admin.DELETE("/coupons/:id", controllers.DeleteCoupon)
 
 		}
 	}

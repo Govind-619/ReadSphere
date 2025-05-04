@@ -219,7 +219,6 @@ func GetBooks(c *gin.Context) {
 	if err := config.DB.Raw(countQuery).Scan(&total).Error; err != nil {
 		log.Printf("Failed to count books: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count books"})
-		return
 	}
 
 	// Add sorting
@@ -247,7 +246,6 @@ func GetBooks(c *gin.Context) {
 	if err := config.DB.Raw(query).Scan(&books).Error; err != nil {
 		log.Printf("Failed to fetch books: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch books"})
-		return
 	}
 
 	// Get categories for filtering with only essential fields
@@ -342,14 +340,12 @@ func CreateBook(c *gin.Context) {
 	if !exists {
 		log.Printf("Admin not found in context")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
-		return
 	}
 
 	adminModel, ok := admin.(models.Admin)
 	if !ok {
 		log.Printf("Invalid admin type in context")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
-		return
 	}
 
 	log.Printf("Admin authenticated: %s", adminModel.Email)
@@ -358,7 +354,6 @@ func CreateBook(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("Invalid input: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
 	}
 
 	// Create the book
@@ -390,7 +385,6 @@ func CreateBook(c *gin.Context) {
 			"error":  "Failed to create book",
 			"reason": err.Error(),
 		})
-		return
 	}
 
 	// Insert BookImages if provided
@@ -410,7 +404,6 @@ func CreateBook(c *gin.Context) {
 		"message": "Book created successfully",
 		"book":    book,
 	})
-	return
 }
 
 // UpdateBook handles book updates
@@ -422,14 +415,12 @@ func UpdateBook(c *gin.Context) {
 	if !exists {
 		log.Printf("Admin not found in context")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
-		return
 	}
 
 	adminModel, ok := admin.(models.Admin)
 	if !ok {
 		log.Printf("Invalid admin type in context")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
-		return
 	}
 
 	log.Printf("Admin authenticated: %s", adminModel.Email)
@@ -439,7 +430,6 @@ func UpdateBook(c *gin.Context) {
 	if bookID == "" {
 		log.Printf("Book ID not provided in URL")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Book ID is required"})
-		return
 	}
 
 	log.Printf("Updating book with ID: %s", bookID)
@@ -460,7 +450,6 @@ func UpdateBook(c *gin.Context) {
 	if err := config.DB.Raw(query, bookID).Scan(&book).Error; err != nil {
 		log.Printf("Book not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
-		return
 	}
 
 	log.Printf("Found book to update: %s (ID: %s)", book.Name, bookID)
@@ -470,7 +459,6 @@ func UpdateBook(c *gin.Context) {
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		log.Printf("Invalid input: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
 	}
 
 	log.Printf("Update data: %+v", updateData)
@@ -504,7 +492,6 @@ func UpdateBook(c *gin.Context) {
 		if err != nil {
 			log.Printf("Invalid discount end date format: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid discount end date format"})
-			return
 		}
 		updates["discount_end_date"] = parsedDate
 	}
@@ -537,14 +524,12 @@ func UpdateBook(c *gin.Context) {
 		if err := validateImageURLs(imageURLs); err != nil {
 			log.Printf("Invalid image URLs: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
 		}
 
 		// Delete existing BookImages for this book
 		if err := config.DB.Where("book_id = ?", book.ID).Delete(&models.BookImage{}).Error; err != nil {
 			log.Printf("Failed to delete old BookImages: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update images: " + err.Error()})
-			return
 		}
 
 		// Insert new BookImages
@@ -580,7 +565,6 @@ func UpdateBook(c *gin.Context) {
 		if err := config.DB.Where("isbn = ? AND id != ? AND deleted_at IS NULL", isbn, bookID).First(&existingBook).Error; err == nil {
 			log.Printf("ISBN already exists in an active book: %s", isbn)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
-			return
 		}
 		updates["isbn"] = isbn
 	}
@@ -617,46 +601,20 @@ func UpdateBook(c *gin.Context) {
 			if strings.Contains(err.Error(), "unique constraint") || strings.Contains(err.Error(), "duplicate key") {
 				log.Printf("ISBN already exists: %s", updates["isbn"])
 				c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
-				return
 			}
 
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update book: " + err.Error()})
-			return
 		}
 	}
 
 	// Fetch the updated book with all relations using GORM Preload and the correct ID
-	var idUint uint64
-	var err error
-	idUint, err = strconv.ParseUint(bookID, 10, 64)
-	if err != nil {
-		log.Printf("Invalid book ID: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
-		return
-	}
 	var updatedBook models.Book
-	if err := config.DB.Preload("BookImages").Preload("Category").Preload("Genre").First(&updatedBook, uint(idUint)).Error; err != nil {
+	if err := config.DB.Preload("BookImages").Preload("Category").Preload("Genre").First(&updatedBook, book.ID).Error; err != nil {
 		log.Printf("Failed to fetch updated book: %v", err)
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Book updated, but failed to fetch updated details",
 			"book":    book,
 		})
-		return
-	}
-	log.Printf("Book updated successfully: %s", updatedBook.Name)
-	idUint, err = strconv.ParseUint(bookID, 10, 64)
-if err != nil {
-	log.Printf("Invalid book ID: %v", err)
-	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid book ID"})
-	return
-}
-if err := config.DB.Preload("BookImages").Preload("Category").Preload("Genre").First(&updatedBook, book.ID).Error; err != nil {
-		log.Printf("Failed to fetch updated book: %v", err)
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Book updated, but failed to fetch updated details",
-			"book":    book,
-		})
-		return
 	}
 
 	// Ensure images field is populated in the response
@@ -695,7 +653,6 @@ func DeleteBook(c *gin.Context) {
 	if id == "" {
 		log.Printf("Book ID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Book ID is required"})
-		return
 	}
 
 	// Check if the book exists before trying to delete it
@@ -715,7 +672,6 @@ func DeleteBook(c *gin.Context) {
 	if err := config.DB.Raw(query, id).Scan(&book).Error; err != nil {
 		log.Printf("Book not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
-		return
 	}
 
 	log.Printf("Found book to delete: %s (ID: %s)", book.Name, id)
@@ -725,7 +681,6 @@ func DeleteBook(c *gin.Context) {
 	if err := config.DB.Unscoped().Delete(&book).Error; err != nil {
 		log.Printf("Failed to delete book: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete book: " + err.Error()})
-		return
 	}
 
 	log.Printf("Book deleted successfully: %s (ID: %s)", book.Name, id)
@@ -739,7 +694,6 @@ func GetBookReviews(c *gin.Context) {
 
 	if err := config.DB.Preload("User").Where("book_id = ?", bookID).Find(&reviews).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch reviews"})
-		return
 	}
 
 	c.JSON(http.StatusOK, reviews)
@@ -752,13 +706,11 @@ func ApproveReview(c *gin.Context) {
 
 	if err := config.DB.First(&review, reviewID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Review not found"})
-		return
 	}
 
 	review.IsApproved = true
 	if err := config.DB.Save(&review).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to approve review"})
-		return
 	}
 
 	c.JSON(http.StatusOK, review)
@@ -771,12 +723,10 @@ func DeleteReview(c *gin.Context) {
 
 	if err := config.DB.First(&review, reviewID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Review not found"})
-		return
 	}
 
 	if err := config.DB.Delete(&review).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete review"})
-		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Review deleted successfully"})
@@ -792,7 +742,6 @@ func GetBookDetails(c *gin.Context) {
 	if bookID == "" {
 		log.Printf("Book ID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Book ID is required"})
-		return
 	}
 
 	// First, fetch the book without the images field
@@ -811,7 +760,6 @@ func GetBookDetails(c *gin.Context) {
 	if err := config.DB.Raw(query, bookID).Scan(&book).Error; err != nil {
 		log.Printf("Book not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found: " + err.Error()})
-		return
 	}
 
 	// Check if the book is inactive
@@ -821,7 +769,6 @@ func GetBookDetails(c *gin.Context) {
 			"error":        "Book is inactive. Redirected to products page.",
 			"redirect_url": "/v1/books",
 		})
-		return
 	}
 
 	// Now fetch the images separately using array_to_json
@@ -1008,7 +955,6 @@ func CheckBookExists(c *gin.Context) {
 	if id == "" {
 		log.Printf("Book ID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Book ID is required"})
-		return
 	}
 
 	// First, fetch the book without the images field
@@ -1016,7 +962,6 @@ func CheckBookExists(c *gin.Context) {
 	if err := config.DB.First(&book, id).Error; err != nil {
 		log.Printf("Book not found: %v", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
-		return
 	}
 
 	// Fetch BookImages from the BookImage table

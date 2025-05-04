@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -83,7 +84,61 @@ func AddToCart(c *gin.Context) {
 		}
 		cart.Quantity = newQty
 		db.Save(&cart)
-		c.JSON(http.StatusOK, gin.H{"message": "Cart updated (incremented)", "cart": cart})
+		// After update, fetch all cart items for the user
+		var cartItems []models.Cart
+		db.Where("user_id = ?", userID).Find(&cartItems)
+		canCheckout := true
+		for i := range cartItems {
+			book, err := utils.GetBookByIDForCart(cartItems[i].BookID)
+			if err == nil && book != nil {
+				cartItems[i].Book = *book
+			}
+			if !cartItems[i].Book.IsActive || cartItems[i].Book.Blocked {
+				canCheckout = false
+			}
+			if cartItems[i].Book.CategoryID != 0 {
+				var category models.Category
+				db := config.DB
+				db.First(&category, cartItems[i].Book.CategoryID)
+				if category.Blocked {
+					canCheckout = false
+				}
+			}
+			if cartItems[i].Book.Stock < cartItems[i].Quantity {
+				canCheckout = false
+			}
+		}
+		var minimalCartItems []gin.H
+		subtotal := 0.0
+		for _, item := range cartItems {
+			book := item.Book
+			itemSubtotal := book.Price * float64(item.Quantity)
+			subtotal += itemSubtotal
+			minimalCartItems = append(minimalCartItems, gin.H{
+				"book_id":   book.ID,
+				"name":      book.Name,
+				"image_url": book.ImageURL,
+				"quantity":  item.Quantity,
+				"price":     fmt.Sprintf("%.2f", book.Price),
+				"total":     fmt.Sprintf("%.2f", itemSubtotal),
+				"stock_status": func() string {
+					if book.Stock < item.Quantity {
+						return "Out of Stock"
+					}
+					if book.Stock <= 3 {
+						return "Only a few left"
+					}
+					return "In Stock"
+				}(),
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "Cart updated (incremented)",
+			"cart":         minimalCartItems,
+			"subtotal":     fmt.Sprintf("%.2f", subtotal),
+			"total":        fmt.Sprintf("%.2f", subtotal),
+			"can_checkout": canCheckout,
+		})
 		return
 	}
 	if req.Quantity > book.Stock {
@@ -133,9 +188,9 @@ func AddToCart(c *gin.Context) {
 			"book_id":   book.ID,
 			"name":      book.Name,
 			"image_url": book.ImageURL,
-			"price":     book.Price,
 			"quantity":  item.Quantity,
-			"subtotal":  itemSubtotal,
+			"price":     fmt.Sprintf("%.2f", book.Price),
+			"total":     fmt.Sprintf("%.2f", itemSubtotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -150,8 +205,8 @@ func AddToCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Product added to cart",
 		"cart":         minimalCartItems,
-		"subtotal":     subtotal,
-		"total":        subtotal,
+		"subtotal":     fmt.Sprintf("%.2f", subtotal),
+		"total":        fmt.Sprintf("%.2f", subtotal),
 		"can_checkout": canCheckout,
 	})
 }
@@ -203,9 +258,9 @@ func GetCart(c *gin.Context) {
 			"book_id":   book.ID,
 			"name":      book.Name,
 			"image_url": book.ImageURL,
-			"price":     book.Price,
 			"quantity":  item.Quantity,
-			"subtotal":  itemSubtotal,
+			"price":     fmt.Sprintf("%.2f", book.Price),
+			"total":     fmt.Sprintf("%.2f", itemSubtotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -222,8 +277,8 @@ func GetCart(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"cart":         minimalCartItems,
-		"subtotal":     subtotal,
-		"total":        subtotal, // Add discounts, shipping, taxes if/when needed
+		"subtotal":     fmt.Sprintf("%.2f", subtotal),
+		"total":        fmt.Sprintf("%.2f", subtotal), // Add discounts, shipping, taxes if/when needed
 		"can_checkout": canCheckout,
 	})
 }
@@ -318,9 +373,9 @@ func UpdateCart(c *gin.Context) {
 			"book_id":   book.ID,
 			"name":      book.Name,
 			"image_url": book.ImageURL,
-			"price":     book.Price,
 			"quantity":  item.Quantity,
-			"subtotal":  itemSubtotal,
+			"price":     fmt.Sprintf("%.2f", book.Price),
+			"total":     fmt.Sprintf("%.2f", itemSubtotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -335,8 +390,8 @@ func UpdateCart(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Cart updated",
 		"cart":         minimalCartItems,
-		"subtotal":     subtotal,
-		"total":        subtotal,
+		"subtotal":     fmt.Sprintf("%.2f", subtotal),
+		"total":        fmt.Sprintf("%.2f", subtotal),
 		"can_checkout": canCheckout,
 	})
 }

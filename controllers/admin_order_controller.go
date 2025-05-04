@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -89,8 +90,38 @@ func AdminListOrders(c *gin.Context) {
 		})
 	}
 
+	// Format the final total for display in the response
+	type DisplayOrderMinimal struct {
+		ID         uint      `json:"id"`
+		Username   string    `json:"username"`
+		Email      string    `json:"email"`
+		Address    string    `json:"address"`
+		City       string    `json:"city"`
+		State      string    `json:"state"`
+		FinalTotal string    `json:"final_total"`
+		Status     string    `json:"status"`
+		CreatedAt  time.Time `json:"created_at"`
+		ItemCount  int       `json:"item_count"`
+	}
+
+	displayOrders := make([]DisplayOrderMinimal, len(minimalOrders))
+	for i, order := range minimalOrders {
+		displayOrders[i] = DisplayOrderMinimal{
+			ID:         order.ID,
+			Username:   order.Username,
+			Email:      order.Email,
+			Address:    order.Address,
+			City:       order.City,
+			State:      order.State,
+			FinalTotal: fmt.Sprintf("%.2f", order.FinalTotal),
+			Status:     order.Status,
+			CreatedAt:  order.CreatedAt,
+			ItemCount:  order.ItemCount,
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"orders": minimalOrders,
+		"orders": displayOrders,
 		"pagination": gin.H{
 			"total":       total,
 			"page":        page,
@@ -140,7 +171,7 @@ func AdminGetOrderDetails(c *gin.Context) {
 		Address    string    `json:"address"`
 		City       string    `json:"city"`
 		State      string    `json:"state"`
-		FinalTotal float64   `json:"final_total"`
+		FinalTotal string    `json:"final_total"`
 		Status     string    `json:"status"`
 		CreatedAt  time.Time `json:"created_at"`
 		Items      []struct {
@@ -149,8 +180,8 @@ func AdminGetOrderDetails(c *gin.Context) {
 			Category string `json:"category"`
 			Genre    string `json:"genre"`
 			Quantity int    `json:"quantity"`
-			Price    float64 `json:"price"`
-			Total    float64 `json:"total"`
+			Price    string `json:"price"`
+			Total    string `json:"total"`
 		} `json:"items"`
 	}
 	items := make([]struct {
@@ -159,8 +190,8 @@ func AdminGetOrderDetails(c *gin.Context) {
 		Category string `json:"category"`
 		Genre    string `json:"genre"`
 		Quantity int    `json:"quantity"`
-		Price    float64 `json:"price"`
-		Total    float64 `json:"total"`
+		Price    string `json:"price"`
+		Total    string `json:"total"`
 	}, 0, len(order.OrderItems))
 	for _, item := range order.OrderItems {
 		items = append(items, struct {
@@ -169,16 +200,16 @@ func AdminGetOrderDetails(c *gin.Context) {
 			Category string `json:"category"`
 			Genre    string `json:"genre"`
 			Quantity int    `json:"quantity"`
-			Price    float64 `json:"price"`
-			Total    float64 `json:"total"`
+			Price    string `json:"price"`
+			Total    string `json:"total"`
 		}{
 			ID:       item.ID,
 			Name:     item.Book.Name,
 			Category: item.Book.Category.Name,
 			Genre:    item.Book.Genre.Name,
 			Quantity: item.Quantity,
-			Price:    item.Price,
-			Total:    item.Total,
+			Price:    fmt.Sprintf("%.2f", item.Price),
+			Total:    fmt.Sprintf("%.2f", item.Total),
 		})
 	}
 	resp := AdminOrderDetailMinimal{
@@ -188,7 +219,7 @@ func AdminGetOrderDetails(c *gin.Context) {
 		Address:    order.Address.Line1,
 		City:       order.Address.City,
 		State:      order.Address.State,
-		FinalTotal: order.FinalTotal,
+		FinalTotal: fmt.Sprintf("%.2f", order.FinalTotal),
 		Status:     order.Status,
 		CreatedAt:  order.CreatedAt,
 		Items:      items,
@@ -269,7 +300,7 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 		Address    string    `json:"address"`
 		City       string    `json:"city"`
 		State      string    `json:"state"`
-		FinalTotal float64   `json:"final_total"`
+		FinalTotal string    `json:"final_total"`
 		Status     string    `json:"status"`
 		CreatedAt  time.Time `json:"created_at"`
 		Items      []struct {
@@ -278,8 +309,8 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 			Category string `json:"category"`
 			Genre    string `json:"genre"`
 			Quantity int    `json:"quantity"`
-			Price    float64 `json:"price"`
-			Total    float64 `json:"total"`
+			Price    string `json:"price"`
+			Total    string `json:"total"`
 		} `json:"items"`
 	}
 	items := make([]struct {
@@ -288,8 +319,8 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 		Category string `json:"category"`
 		Genre    string `json:"genre"`
 		Quantity int    `json:"quantity"`
-		Price    float64 `json:"price"`
-		Total    float64 `json:"total"`
+		Price    string `json:"price"`
+		Total    string `json:"total"`
 	}, 0, len(fullOrder.OrderItems))
 	for _, item := range fullOrder.OrderItems {
 		items = append(items, struct {
@@ -298,16 +329,16 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 			Category string `json:"category"`
 			Genre    string `json:"genre"`
 			Quantity int    `json:"quantity"`
-			Price    float64 `json:"price"`
-			Total    float64 `json:"total"`
+			Price    string `json:"price"`
+			Total    string `json:"total"`
 		}{
 			ID:       item.ID,
 			Name:     item.Book.Name,
 			Category: item.Book.Category.Name,
 			Genre:    item.Book.Genre.Name,
 			Quantity: item.Quantity,
-			Price:    item.Price,
-			Total:    item.Total,
+			Price:    fmt.Sprintf("%.2f", item.Price),
+			Total:    fmt.Sprintf("%.2f", item.Total),
 		})
 	}
 	resp := AdminOrderDetailMinimal{
@@ -317,7 +348,7 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 		Address:    fullOrder.Address.Line1,
 		City:       fullOrder.Address.City,
 		State:      fullOrder.Address.State,
-		FinalTotal: fullOrder.FinalTotal,
+		FinalTotal: fmt.Sprintf("%.2f", fullOrder.FinalTotal),
 		Status:     fullOrder.Status,
 		CreatedAt:  fullOrder.CreatedAt,
 		Items:      items,
@@ -325,41 +356,18 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Order status updated", "order": resp})
 }
 
-// AdminRejectReturn handles rejecting a return request for an order
+// DEPRECATED: AdminRejectReturn has been merged with RejectOrderReturn in wallet_controller.go
+// This function redirects to the new implementation for backwards compatibility
 func AdminRejectReturn(c *gin.Context) {
-	orderID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID"})
-		return
-	}
-	var req struct {
-		Reason string `json:"reason" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Reason == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Rejection reason is required"})
-		return
-	}
-	var order models.Order
-	if err := config.DB.First(&order, orderID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
-		return
-	}
-	if order.Status != "Returned" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Order is not marked as returned"})
-		return
-	}
-	order.Status = "Return Rejected"
-	order.ReturnRejectReason = req.Reason
-	order.UpdatedAt = time.Now()
-	config.DB.Save(&order)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Return rejected", "order_id": order.ID})
+	c.JSON(http.StatusMovedPermanently, gin.H{
+		"error": "This endpoint is deprecated. Please use /v1/admin/orders/:id/return/reject instead.",
+	})
 }
 
 // AdminListReturnRequests lists all return requests pending admin action
 func AdminListReturnRequests(c *gin.Context) {
 	var orders []models.Order
-	query := config.DB.Preload("User").Preload("Address").Where("status = ?", "Returned")
+	query := config.DB.Preload("User").Preload("Address").Where("status = ? OR status = ?", "Returned", models.OrderStatusReturnRequested)
 
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -407,29 +415,10 @@ func AdminListReturnRequests(c *gin.Context) {
 	})
 }
 
-// AdminAcceptReturn handles accepting a return and refunds to user's wallet
+// DEPRECATED: AdminAcceptReturn has been merged with ApproveOrderReturn in wallet_controller.go
+// This function redirects to the new implementation for backwards compatibility
 func AdminAcceptReturn(c *gin.Context) {
-	orderID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID"})
-		return
-	}
-	var order models.Order
-	if err := config.DB.Preload("User").Preload("OrderItems").First(&order, orderID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
-		return
-	}
-	if order.Status != "Returned" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Order is not marked as returned"})
-		return
-	}
-	// No wallet_balance column, skip refund step
-	order.Status = "Return Accepted"
-	order.UpdatedAt = time.Now()
-	config.DB.Save(&order)
-	// Restock books
-	for _, item := range order.OrderItems {
-		config.DB.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity))
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "Return accepted, refunded, and stock reverted", "order_id": order.ID})
+	c.JSON(http.StatusMovedPermanently, gin.H{
+		"error": "This endpoint is deprecated. Please use /v1/admin/orders/:id/return/approve instead.",
+	})
 }
