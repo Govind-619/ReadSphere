@@ -18,6 +18,7 @@ import (
 
 // InitiateWalletTopup initiates a payment to add money to the wallet
 func InitiateWalletTopup(c *gin.Context) {
+	fmt.Println("InitiateWalletTopup endpoint called")
 	userVal, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -57,6 +58,19 @@ func InitiateWalletTopup(c *gin.Context) {
 		return
 	}
 
+	// Save WalletTopupOrder in DB
+	walletTopupOrder := models.WalletTopupOrder{
+		UserID: userID,
+		RazorpayOrderID: fmt.Sprintf("%v", rzOrder["id"]),
+		Amount: req.Amount,
+		Status: "pending",
+	}
+	if err := config.DB.Create(&walletTopupOrder).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record wallet topup order", "details": err.Error()})
+		return
+	}
+
+
 	c.JSON(http.StatusOK, gin.H{
 		"razorpay_order_id": rzOrder["id"],
 		"amount":            rzOrder["amount"],
@@ -77,6 +91,7 @@ func InitiateWalletTopup(c *gin.Context) {
 
 // VerifyWalletTopup verifies the payment and adds money to the wallet
 func VerifyWalletTopup(c *gin.Context) {
+	fmt.Println("VerifyWalletTopup endpoint called")
 	userVal, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -86,15 +101,23 @@ func VerifyWalletTopup(c *gin.Context) {
 	userID := user.ID
 
 	var req struct {
-		RazorpayOrderID   string  `json:"razorpay_order_id" binding:"required"`
-		RazorpayPaymentID string  `json:"razorpay_payment_id" binding:"required"`
-		RazorpaySignature string  `json:"razorpay_signature" binding:"required"`
-		Amount            float64 `json:"amount" binding:"required,min=1"`
+		RazorpayOrderID   string `json:"razorpay_order_id" binding:"required"`
+		RazorpayPaymentID string `json:"razorpay_payment_id" binding:"required"`
+		RazorpaySignature string `json:"razorpay_signature" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
 		return
 	}
+
+	// Fetch the WalletTopupOrder from DB to get the amount
+	var walletTopupOrder models.WalletTopupOrder
+	err := config.DB.Where("razorpay_order_id = ?", req.RazorpayOrderID).First(&walletTopupOrder).Error
+	if err != nil || walletTopupOrder.Amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to fetch wallet topup amount for this order_id"})
+		return
+	}
+	amount := walletTopupOrder.Amount
 
 	// Verify signature
 	keySecret := os.Getenv("RAZORPAY_SECRET")
@@ -126,7 +149,7 @@ func VerifyWalletTopup(c *gin.Context) {
 	reference := fmt.Sprintf("TOPUP-%s", req.RazorpayPaymentID)
 	description := fmt.Sprintf("Wallet topup via Razorpay")
 
-	transaction, err := createWalletTransaction(wallet.ID, req.Amount, models.TransactionTypeCredit, description, nil, reference)
+	transaction, err := createWalletTransaction(wallet.ID, amount, models.TransactionTypeCredit, description, nil, reference)
 	if err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction"})
@@ -134,7 +157,7 @@ func VerifyWalletTopup(c *gin.Context) {
 	}
 
 	// Update wallet balance
-	if err := updateWalletBalance(wallet.ID, req.Amount, models.TransactionTypeCredit); err != nil {
+	if err := updateWalletBalance(wallet.ID, amount, models.TransactionTypeCredit); err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update wallet balance"})
 		return
@@ -156,7 +179,7 @@ func VerifyWalletTopup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":           "success",
 		"message":          "Money added to wallet successfully!",
-		"amount_added":     fmt.Sprintf("%.2f", req.Amount),
+		"amount_added":     fmt.Sprintf("%.2f", amount),
 		"wallet_balance":   fmt.Sprintf("%.2f", updatedWallet.Balance),
 		"transaction_id":   transaction.ID,
 		"transaction_date": transaction.CreatedAt,
