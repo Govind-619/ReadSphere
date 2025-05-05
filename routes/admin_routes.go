@@ -94,6 +94,14 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			adminOffers.PATCH("/categories/:id", controllers.UpdateCategoryOffer)
 			adminOffers.DELETE("/categories/:id", controllers.DeleteCategoryOffer)
 
+			// Referral management (admin)
+			admin.POST("/referral/generate", controllers.GenerateReferralToken)
+			admin.GET("/referrals", controllers.GetAllReferrals)
+
+			// Sales report endpoints (admin)
+			admin.GET("/sales/report", controllers.GenerateSalesReport)
+			admin.GET("/sales/report/pdf", controllers.DownloadSalesReportPDF)
+			admin.GET("/sales/report/excel", controllers.DownloadSalesReportExcel)
 		}
 	}
 }

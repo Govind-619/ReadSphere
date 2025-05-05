@@ -27,6 +27,7 @@ type RegisterRequest struct {
 	FirstName       string `json:"first_name"`
 	LastName        string `json:"last_name"`
 	Phone           string `json:"phone"`
+	ReferralCode    string `json:"referral_code"`
 }
 
 // RegistrationData represents the registration data stored in session
@@ -200,6 +201,7 @@ func RegisterUser(c *gin.Context) {
 		"first_name":  req.FirstName,
 		"last_name":   req.LastName,
 		"phone":       req.Phone,
+		"referral_code": req.ReferralCode,
 		"exp":         regExpiry,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -419,6 +421,15 @@ func VerifyOTP(c *gin.Context) {
 	if err := config.DB.Create(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user account"})
 		return
+	}
+
+	// Process referral code if present in registration claims
+	if referralCode, ok := claims["referral_code"].(string); ok && referralCode != "" {
+		err := AcceptReferralCodeAtSignup(user.ID, referralCode)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired referral code"})
+			return
+		}
 	}
 
 	// Generate JWT token for login

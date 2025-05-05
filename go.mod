@@ -13,6 +13,7 @@ require (
 	github.com/jung-kurt/gofpdf v1.16.2
 	github.com/razorpay/razorpay-go v1.3.2
 	github.com/stretchr/testify v1.9.0
+	github.com/tealeg/xlsx v1.0.5
 	golang.org/x/crypto v0.31.0
 	golang.org/x/oauth2 v0.28.0
 	gopkg.in/gomail.v2 v2.0.0-20160411212932-81ebce5c23df

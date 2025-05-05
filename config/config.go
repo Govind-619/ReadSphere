@@ -124,6 +124,8 @@ func InitDB() {
 		&models.WalletTransaction{},
 		&models.ProductOffer{},
 		&models.CategoryOffer{},
+		&models.Referral{},
+		&models.ReferralSignup{},
 	)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to migrate database: %v", err))

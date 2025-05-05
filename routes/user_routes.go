@@ -70,10 +70,12 @@ func initUserRoutes(router *gin.RouterGroup) {
 	router.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
 	// Protected routes (require authentication)
+	// Referral: Accept referral via token (public, user must sign up and then visit link)
+	router.GET("/referral/invite/:token", controllers.AcceptReferralToken)
+
 	protected := router.Group("/user")
 	protected.Use(middleware.AuthMiddleware())
 	{
-		// Payment Integration (Razorpay)
 		protected.POST("/checkout/payment/initiate", paymentcontroller.InitiateRazorpayPayment)
 		protected.POST("/checkout/payment/verify", paymentcontroller.VerifyRazorpayPayment)
 		protected.GET("/checkout/payment/methods", paymentcontroller.GetPaymentMethods)

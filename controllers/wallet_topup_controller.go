@@ -147,7 +147,7 @@ func VerifyWalletTopup(c *gin.Context) {
 
 	// Create a wallet transaction
 	reference := fmt.Sprintf("TOPUP-%s", req.RazorpayPaymentID)
-	description := fmt.Sprintf("Wallet topup via Razorpay")
+	description := "Wallet topup via Razorpay"
 
 	transaction, err := createWalletTransaction(wallet.ID, amount, models.TransactionTypeCredit, description, nil, reference)
 	if err != nil {

@@ -112,7 +112,8 @@ func AddToCart(c *gin.Context) {
 		subtotal := 0.0
 		for _, item := range cartItems {
 			book := item.Book
-			discountPercent, _ := utils.GetBestOfferForBook(book.ID, book.CategoryID)
+			offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+discountPercent := offerBreakdown.AppliedOfferPercent
 			finalUnitPrice := utils.ApplyOfferToPrice(book.Price, discountPercent)
 			itemSubtotal := finalUnitPrice * float64(item.Quantity)
 			subtotal += itemSubtotal
