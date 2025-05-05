@@ -231,19 +231,25 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-## Recent Upgrades (as of April 2025)
+## Recent Upgrades (as of May 2025)
 
 - **Checkout Flow:**
-  - Implemented `/checkout` endpoints:
-    - `POST /checkout` (Place Order): Validates address and cart, calculates subtotal, discounts, tax, and final total. Creates an order and order items, reduces book stock, and clears the cart. Returns full order details.
-    - `GET /checkout` (Get Checkout Summary): Returns cart summary with per-item and total calculations (subtotal, discount, tax, final total).
-  - Checkout logic matches cart/wishlist conventions and supports Cash on Delivery.
+  - `/checkout` endpoints for summary and order placement (Cash on Delivery supported).
+  - Full validation, subtotal/discount/tax/final total calculations, and stock management.
 - **Order Models:**
-  - Added `Order` and `OrderItem` models to manage order data and items.
+  - `Order` and `OrderItem` models for robust order tracking.
 - **Cart/Wishlist Integration:**
-  - Cart and wishlist logic unified for consistent user experience.
+  - Unified logic for cart and wishlist, consistent user experience.
 - **Stock Management:**
-  - Placing an order reduces book stock. Cancelling/restocking updates inventory accordingly.
+  - Automatic inventory adjustment on order/return/cancel.
+- **Wishlist Management:**
+  - Users can add, view, and remove books from their wishlist. Wishlist automatically syncs with cart actions.
+- **Admin Sales Report Export:**
+  - Admin can export sales reports as Excel or PDF, including analytics (top/bottom 5 products, top customers, financials, customer insights, order status summary).
+- **Offer Management:**
+  - Admin can create, list, update, and delete product and category offers. Deleting a non-existent offer returns a RESTful 404 error with an error message.
+- **Improved Error Handling:**
+  - All offer deletion endpoints now return 404 with descriptive error messages if the offer does not exist, improving RESTful API correctness and user feedback.
 
 ---
 
@@ -256,31 +262,47 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Category management (CRUD operations)
 - Product management (CRUD operations with image uploads)
 - Search and pagination functionality
-- **Order Management**
-  - List orders in descending order of date.
-  - View details like Order ID, date, user information.
-  - Change order status: pending, shipped, out for delivery, delivered, cancelled.
-  - Verify return requests.
-    - Upon verification, return the amount to the user's wallet.
-  - Implement search, sort, filter, clear search.
-  - Pagination support.
+- **Offer Management**
+  - Create, list, update, and delete product offers (with discount percent, date range, active status)
+  - Create, list, update, and delete category offers (with discount percent, date range, active status)
+  - RESTful 404 error handling for non-existent offer deletion
+- **Sales Report Export**
+  - Export sales reports as Excel or PDF with analytics (top/bottom products, top customers, financials, order status)
 - **Inventory/Stock Management**
-  - Manage product stock levels and update based on order/return.
+  - Manage product stock levels and update based on order/return/cancellation
+- **Order Management**
+  - List orders in descending order of date
+  - View order details (ID, date, user info)
+  - Change order status (pending, shipped, out for delivery, delivered, cancelled)
+  - Verify and process return requests
+  - Search, sort, filter, and paginate orders
+- **Review Moderation**
+  - Approve or delete reviews on books/products
+
 
 ### User Side
 - User authentication (signup, login, OTP verification)
 - Product browsing with advanced filtering and sorting
 - Product details with reviews and ratings
 - Shopping cart functionality
-- **User Profile**
-  - Show profile details including profile image and address.
-  - Edit profile on a separate page (not the view page).
-    - Email edits require OTP/token verification.
-  - Change password functionality.
-- **Address Management**
-  - Add, edit, and delete user addresses.
+- **Wishlist Management**
+  - Add, view, and remove books from wishlist
+  - Wishlist automatically syncs with cart (removes from wishlist if added to cart)
+- **Checkout and Order Placement**
+  - Place orders (Cash on Delivery supported)
+  - Checkout summary with address selection, itemized totals, discounts, and taxes
+- **Order Tracking & Management**
+  - Track orders, view order details, cancel/return orders, download invoices
+- **User Profile & Address**
+  - Manage profile, change password, upload profile image
+  - Add, edit, delete, and set default addresses
 - **Cart Management**
-  - Add to cart, view cart, and remove items.
+  - Add to cart, view cart, update quantities, remove items
+  - Prevent adding blocked/unlisted or out-of-stock products
+  - Quantity validation based on stock and max limits
+- **Robust Error Handling**
+  - Clear feedback for invalid actions (e.g., trying to delete a non-existent offer)
+
   - Prevent adding blocked/unlisted products.
   - If already in cart, increase quantity.
   - Remove product from wishlist if added to cart.
