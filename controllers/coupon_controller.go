@@ -3,13 +3,13 @@ package controllers
 import (
 	"fmt"
 	"math"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,7 +28,7 @@ type CreateCouponRequest struct {
 func CreateCoupon(c *gin.Context) {
 	var req CreateCouponRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
@@ -37,14 +37,14 @@ func CreateCoupon(c *gin.Context) {
 
 	// Validate expiry date
 	if req.Expiry.Before(time.Now()) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Expiry date must be in the future"})
+		utils.BadRequest(c, "Expiry date must be in the future", nil)
 		return
 	}
 
 	// Start a transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
@@ -52,7 +52,7 @@ func CreateCoupon(c *gin.Context) {
 	var existingCoupon models.Coupon
 	if err := tx.Where("LOWER(code) = LOWER(?)", req.Code).First(&existingCoupon).Error; err == nil {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon code already exists"})
+		utils.BadRequest(c, "Coupon code already exists", nil)
 		return
 	}
 
@@ -71,21 +71,32 @@ func CreateCoupon(c *gin.Context) {
 		tx.Rollback()
 		// Check if error is due to unique constraint violation
 		if err.Error() == "ERROR: duplicate key value violates unique constraint \"idx_coupons_code_lower\" (SQLSTATE 23505)" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon code already exists"})
+			utils.BadRequest(c, "Coupon code already exists", nil)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create coupon: " + err.Error()})
+		utils.InternalServerError(c, "Failed to create coupon", err.Error())
 		return
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", nil)
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Coupon created successfully",
-		"coupon":  coupon,
+	// Return consistent response format
+	utils.Success(c, "Coupon created successfully", gin.H{
+		"id":           coupon.ID,
+		"code":         strings.ToUpper(coupon.Code),
+		"type":         coupon.Type,
+		"value":        coupon.Value,
+		"min_order":    coupon.MinOrderValue,
+		"max_discount": coupon.MaxDiscount,
+		"usage_limit":  coupon.UsageLimit,
+		"used_count":   0,
+		"active":       coupon.Active,
+		"is_expired":   false,
+		"expiry":       coupon.Expiry.Format("2006-01-02"),
+		"created_at":   coupon.CreatedAt.Format("2006-01-02 15:04:05"),
 	})
 }
 
@@ -101,20 +112,20 @@ func ApplyCoupon(c *gin.Context) {
 
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
 
 	var req ApplyCouponRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
 	// Start a transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
@@ -122,21 +133,21 @@ func ApplyCoupon(c *gin.Context) {
 	var coupon models.Coupon
 	if err := tx.Where("code = ? AND active = ?", req.Code, true).First(&coupon).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusNotFound, gin.H{"error": "Invalid or inactive coupon"})
+		utils.NotFound(c, "Invalid or inactive coupon")
 		return
 	}
 
 	// Check if coupon has expired
 	if time.Now().After(coupon.Expiry) {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon has expired"})
+		utils.BadRequest(c, "Coupon has expired", nil)
 		return
 	}
 
 	// Check if coupon has reached usage limit
 	if coupon.UsedCount >= coupon.UsageLimit {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon usage limit reached"})
+		utils.BadRequest(c, "Coupon usage limit reached", nil)
 		return
 	}
 
@@ -144,49 +155,62 @@ func ApplyCoupon(c *gin.Context) {
 	var userCoupon models.UserCoupon
 	if err := tx.Where("user_id = ? AND coupon_id = ?", user.(models.User).ID, coupon.ID).First(&userCoupon).Error; err == nil {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "You have already used this coupon"})
+		utils.BadRequest(c, "You have already used this coupon", nil)
 		return
 	}
 
-	// Get user's cart total
-	var cartTotal float64
-	if err := tx.Model(&models.Cart{}).
-		Select("COALESCE(SUM(books.price * carts.quantity), 0)").
-		Joins("JOIN books ON books.id = carts.book_id").
-		Where("carts.user_id = ?", user.(models.User).ID).
-		Scan(&cartTotal).Error; err != nil {
+	// Calculate cart total before any discounts
+	var cartItems []models.Cart
+	if err := tx.Where("user_id = ?", user.(models.User).ID).Find(&cartItems).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to calculate cart total"})
+		utils.InternalServerError(c, "Failed to fetch cart items", nil)
 		return
+	}
+
+	var subtotal float64
+	var productDiscountTotal float64
+	var categoryDiscountTotal float64
+
+	for _, item := range cartItems {
+		book, err := utils.GetBookByIDForCart(item.BookID)
+		if err != nil {
+			continue
+		}
+		// Calculate product and category discounts
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+		productDiscountAmount := (book.Price * offerBreakdown.ProductOfferPercent / 100) * float64(item.Quantity)
+		categoryDiscountAmount := (book.Price * offerBreakdown.CategoryOfferPercent / 100) * float64(item.Quantity)
+
+		subtotal += book.Price * float64(item.Quantity)
+		productDiscountTotal += productDiscountAmount
+		categoryDiscountTotal += categoryDiscountAmount
 	}
 
 	// Check if cart total meets minimum order value
-	if cartTotal < coupon.MinOrderValue {
+	if subtotal < coupon.MinOrderValue {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cart total is less than minimum order value for this coupon"})
+		utils.BadRequest(c, "Cart total is less than minimum order value for this coupon", nil)
 		return
 	}
 
-	// Calculate discount
-	var discount float64
+	// Calculate coupon discount
+	var couponDiscount float64
 	if coupon.Type == "percent" {
-		discount = (cartTotal * coupon.Value) / 100
-		if discount > coupon.MaxDiscount {
-			discount = coupon.MaxDiscount
+		couponDiscount = (subtotal * coupon.Value) / 100
+		if couponDiscount > coupon.MaxDiscount {
+			couponDiscount = coupon.MaxDiscount
 		}
 	} else {
-		discount = coupon.Value
+		couponDiscount = coupon.Value
 	}
 
 	// Delete any existing active coupons for this user
 	if err := tx.Where("user_id = ?", user.(models.User).ID).Delete(&models.UserActiveCoupon{}).Error; err != nil {
-		// Don't fail if the error is related to table not existing yet - just log and continue
 		if tx.Migrator().HasTable(&models.UserActiveCoupon{}) {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear previous active coupons"})
+			utils.InternalServerError(c, "Failed to clear previous active coupons", nil)
 			return
 		}
-		// If table doesn't exist, just continue with the process
 	}
 
 	// Create active coupon record
@@ -199,20 +223,28 @@ func ApplyCoupon(c *gin.Context) {
 
 	if err := tx.Create(&activeUserCoupon).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save active coupon"})
+		utils.InternalServerError(c, "Failed to save active coupon", nil)
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":     "Coupon applied successfully",
-		"discount":    discount,
-		"final_total": cartTotal - discount,
+	// Calculate final total after all discounts
+	totalDiscount := productDiscountTotal + categoryDiscountTotal + couponDiscount
+	finalTotal := math.Round((subtotal-totalDiscount)*100) / 100
+
+	utils.Success(c, "Coupon applied successfully", gin.H{
+		"subtotal":          fmt.Sprintf("%.2f", math.Round(subtotal*100)/100),
+		"product_discount":  fmt.Sprintf("%.2f", math.Round(productDiscountTotal*100)/100),
+		"category_discount": fmt.Sprintf("%.2f", math.Round(categoryDiscountTotal*100)/100),
+		"coupon_discount":   fmt.Sprintf("%.2f", math.Round(couponDiscount*100)/100),
+		"coupon_code":       coupon.Code,
+		"total_discount":    fmt.Sprintf("%.2f", math.Round(totalDiscount*100)/100),
+		"final_total":       fmt.Sprintf("%.2f", finalTotal),
 	})
 }
 
@@ -223,35 +255,70 @@ func RemoveCoupon(c *gin.Context) {
 
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
 
 	var req ApplyCouponRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
+	db := config.DB
 	// Get the coupon
 	var coupon models.Coupon
-	if err := config.DB.Where("code = ?", req.Code).First(&coupon).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Invalid coupon"})
+	if err := db.Where("code = ?", req.Code).First(&coupon).Error; err != nil {
+		utils.NotFound(c, "Invalid coupon")
 		return
 	}
 
 	// Delete active coupon record
-	if err := config.DB.Where("user_id = ? AND coupon_id = ?", user.(models.User).ID, coupon.ID).Delete(&models.UserActiveCoupon{}).Error; err != nil {
-		// Don't fail if the error is related to table not existing yet
-		if config.DB.Migrator().HasTable(&models.UserActiveCoupon{}) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove active coupon"})
+	if err := db.Where("user_id = ? AND coupon_id = ?", user.(models.User).ID, coupon.ID).Delete(&models.UserActiveCoupon{}).Error; err != nil {
+		if db.Migrator().HasTable(&models.UserActiveCoupon{}) {
+			utils.InternalServerError(c, "Failed to remove active coupon", nil)
 			return
 		}
-		// If table doesn't exist, just continue
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Coupon removed successfully",
+	// Calculate cart totals after removing coupon
+	var cartItems []models.Cart
+	if err := db.Where("user_id = ?", user.(models.User).ID).Find(&cartItems).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch cart items", nil)
+		return
+	}
+
+	var subtotal float64
+	var productDiscountTotal float64
+	var categoryDiscountTotal float64
+
+	for _, item := range cartItems {
+		book, err := utils.GetBookByIDForCart(item.BookID)
+		if err != nil {
+			continue
+		}
+		// Calculate product and category discounts
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+		productDiscountAmount := (book.Price * offerBreakdown.ProductOfferPercent / 100) * float64(item.Quantity)
+		categoryDiscountAmount := (book.Price * offerBreakdown.CategoryOfferPercent / 100) * float64(item.Quantity)
+
+		subtotal += book.Price * float64(item.Quantity)
+		productDiscountTotal += productDiscountAmount
+		categoryDiscountTotal += categoryDiscountAmount
+	}
+
+	// Calculate final total after all discounts (excluding coupon)
+	totalDiscount := productDiscountTotal + categoryDiscountTotal
+	finalTotal := math.Round((subtotal-totalDiscount)*100) / 100
+
+	utils.Success(c, "Coupon removed successfully", gin.H{
+		"subtotal":          fmt.Sprintf("%.2f", math.Round(subtotal*100)/100),
+		"product_discount":  fmt.Sprintf("%.2f", math.Round(productDiscountTotal*100)/100),
+		"category_discount": fmt.Sprintf("%.2f", math.Round(categoryDiscountTotal*100)/100),
+		"coupon_discount":   "0.00",
+		"coupon_code":       "",
+		"total_discount":    fmt.Sprintf("%.2f", math.Round(totalDiscount*100)/100),
+		"final_total":       fmt.Sprintf("%.2f", finalTotal),
 	})
 }
 
@@ -285,7 +352,7 @@ func GetCoupons(c *gin.Context) {
 	// Get total count
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count coupons"})
+		utils.InternalServerError(c, "Failed to count coupons", nil)
 		return
 	}
 
@@ -293,24 +360,72 @@ func GetCoupons(c *gin.Context) {
 	offset := (page - 1) * limit
 	var coupons []models.Coupon
 	if err := query.Offset(offset).Limit(limit).Find(&coupons).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch coupons"})
+		utils.InternalServerError(c, "Failed to fetch coupons", nil)
 		return
 	}
 
-	// Convert all codes to uppercase for consistency
-	for i := range coupons {
-		coupons[i].Code = strings.ToUpper(coupons[i].Code)
+	// Format coupons with only necessary information
+	var formattedCoupons []gin.H
+	for _, coupon := range coupons {
+		isExpired := time.Now().After(coupon.Expiry)
+		isValid := coupon.Active && !isExpired
+
+		// Create user-friendly description
+		description := fmt.Sprintf("%s %s off on orders above ₹%.2f (Max discount: ₹%.2f)",
+			func() string {
+				if coupon.Type == "percent" {
+					return fmt.Sprintf("%.0f%%", coupon.Value)
+				}
+				return fmt.Sprintf("₹%.2f", coupon.Value)
+			}(),
+			func() string {
+				if coupon.Type == "percent" {
+					return ""
+				}
+				return "flat"
+			}(),
+			coupon.MinOrderValue,
+			coupon.MaxDiscount,
+		)
+
+		// Check if admin is in context to determine response format
+		_, isAdmin := c.Get("admin")
+		if isAdmin {
+			// Admin view - show additional details
+			formattedCoupons = append(formattedCoupons, gin.H{
+				"id":           coupon.ID,
+				"code":         strings.ToUpper(coupon.Code),
+				"type":         coupon.Type,
+				"value":        coupon.Value,
+				"min_order":    coupon.MinOrderValue,
+				"max_discount": coupon.MaxDiscount,
+				"usage_limit":  coupon.UsageLimit,
+				"used_count":   coupon.UsedCount,
+				"active":       coupon.Active,
+				"is_expired":   isExpired,
+				"expiry":       coupon.Expiry.Format("2006-01-02"),
+				"created_at":   coupon.CreatedAt.Format("2006-01-02 15:04:05"),
+			})
+		} else {
+			// User view - show minimal details
+			formattedCoupons = append(formattedCoupons, gin.H{
+				"code":         strings.ToUpper(coupon.Code),
+				"description":  description,
+				"expiry":       coupon.Expiry.Format("2006-01-02"),
+				"is_valid":     isValid,
+				"max_discount": fmt.Sprintf("%.2f", coupon.MaxDiscount),
+				"min_order":    fmt.Sprintf("%.2f", coupon.MinOrderValue),
+			})
+		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"coupons": coupons,
+	utils.Success(c, "Coupons retrieved successfully", gin.H{
+		"coupons": formattedCoupons,
 		"pagination": gin.H{
-			"total":   total,
-			"page":    page,
-			"limit":   limit,
-			"pages":   int(math.Ceil(float64(total) / float64(limit))),
-			"sort_by": sortBy,
-			"order":   order,
+			"current_page": page,
+			"per_page":     limit,
+			"total":        total,
+			"total_pages":  int(math.Ceil(float64(total) / float64(limit))),
 		},
 	})
 }
@@ -320,27 +435,27 @@ func DeleteCoupon(c *gin.Context) {
 	// Check if admin is in context
 	admin, exists := c.Get("admin")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
+		utils.Unauthorized(c, "Admin not found in context")
 		return
 	}
 
 	_, ok := admin.(models.Admin)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
+		utils.InternalServerError(c, "Invalid admin type", nil)
 		return
 	}
 
 	// Get identifier from URL parameter
 	identifier := c.Param("id")
 	if identifier == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon identifier is required"})
+		utils.BadRequest(c, "Coupon identifier is required", nil)
 		return
 	}
 
 	// Start a transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
@@ -353,7 +468,7 @@ func DeleteCoupon(c *gin.Context) {
 		query = tx.Where("LOWER(code) = LOWER(?)", identifier)
 		if err := query.First(&coupon).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusNotFound, gin.H{"error": "Coupon not found"})
+			utils.NotFound(c, "Coupon not found")
 			return
 		}
 	}
@@ -361,26 +476,24 @@ func DeleteCoupon(c *gin.Context) {
 	// Check if coupon has been used
 	if coupon.UsedCount > 0 {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete a coupon that has been used"})
+		utils.BadRequest(c, "Cannot delete a coupon that has been used", nil)
 		return
 	}
 
 	// Delete the coupon
 	if err := tx.Delete(&coupon).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete coupon"})
+		utils.InternalServerError(c, "Failed to delete coupon", nil)
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Coupon deleted successfully",
-	})
+	utils.Success(c, "Coupon deleted successfully", nil)
 }
 
 // UpdateCouponRequest represents the request body for updating an existing coupon
@@ -399,33 +512,33 @@ func UpdateCoupon(c *gin.Context) {
 	// Check if admin is in context
 	admin, exists := c.Get("admin")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
+		utils.Unauthorized(c, "Admin not found in context")
 		return
 	}
 
 	_, ok := admin.(models.Admin)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
+		utils.InternalServerError(c, "Invalid admin type", nil)
 		return
 	}
 
 	// Get identifier from URL parameter
 	identifier := c.Param("id")
 	if identifier == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Coupon identifier is required"})
+		utils.BadRequest(c, "Coupon identifier is required", nil)
 		return
 	}
 
 	var req UpdateCouponRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
 	// Start a transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
@@ -438,7 +551,7 @@ func UpdateCoupon(c *gin.Context) {
 		query = tx.Where("LOWER(code) = LOWER(?)", identifier)
 		if err := query.First(&coupon).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusNotFound, gin.H{"error": "Coupon not found"})
+			utils.NotFound(c, "Coupon not found")
 			return
 		}
 	}
@@ -446,7 +559,7 @@ func UpdateCoupon(c *gin.Context) {
 	// Validate expiry date if provided
 	if !req.Expiry.IsZero() && req.Expiry.Before(time.Now()) {
 		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Expiry date must be in the future"})
+		utils.BadRequest(c, "Expiry date must be in the future", nil)
 		return
 	}
 
@@ -478,18 +591,30 @@ func UpdateCoupon(c *gin.Context) {
 	// Update the coupon
 	if err := tx.Model(&coupon).Updates(updates).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update coupon"})
+		utils.InternalServerError(c, "Failed to update coupon", nil)
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Coupon updated successfully",
-		"coupon":  coupon,
+	// Return concise response
+	isExpired := time.Now().After(coupon.Expiry)
+	utils.Success(c, "Coupon updated successfully", gin.H{
+		"id":           coupon.ID,
+		"code":         strings.ToUpper(coupon.Code),
+		"type":         coupon.Type,
+		"value":        coupon.Value,
+		"min_order":    coupon.MinOrderValue,
+		"max_discount": coupon.MaxDiscount,
+		"usage_limit":  coupon.UsageLimit,
+		"used_count":   coupon.UsedCount,
+		"active":       coupon.Active,
+		"is_expired":   isExpired,
+		"expiry":       coupon.Expiry.Format("2006-01-02"),
+		"last_updated": coupon.UpdatedAt.Format("2006-01-02 15:04:05"),
 	})
 }

@@ -1,13 +1,43 @@
 package controllers
 
 import (
-	"net/http"
-	"time"
+	"math/rand"
 	"strings"
+	"time"
+
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// GenerateMixedToken generates a 6-character token with 3 numbers and 3 letters in random order
+func GenerateMixedToken() string {
+	// Initialize random seed
+	rand.Seed(time.Now().UnixNano())
+
+	// Generate 3 random numbers
+	numbers := make([]string, 3)
+	for i := 0; i < 3; i++ {
+		numbers[i] = string(rune('0' + rand.Intn(10)))
+	}
+
+	// Generate 3 random uppercase letters
+	letters := make([]string, 3)
+	for i := 0; i < 3; i++ {
+		letters[i] = string(rune('A' + rand.Intn(26)))
+	}
+
+	// Combine numbers and letters
+	combined := append(numbers, letters...)
+
+	// Shuffle the combined slice
+	rand.Shuffle(len(combined), func(i, j int) {
+		combined[i], combined[j] = combined[j], combined[i]
+	})
+
+	return strings.Join(combined, "")
+}
 
 // Admin: Generate referral token URL and coupon for a user
 func GenerateReferralToken(c *gin.Context) {
@@ -15,13 +45,20 @@ func GenerateReferralToken(c *gin.Context) {
 		UserID uint `json:"user_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
-	referToken := strings.ToUpper(RandomString(10))
-	referralCode := strings.ToUpper(RandomString(6))
+	referralCode := GenerateMixedToken()
 
+	// Start transaction
+	tx := config.DB.Begin()
+	if tx.Error != nil {
+		utils.InternalServerError(c, "Failed to start transaction", tx.Error.Error())
+		return
+	}
+
+	// Create coupon first
 	coupon := models.Coupon{
 		Code:          "REF-" + referralCode,
 		Type:          "percent",
@@ -32,21 +69,35 @@ func GenerateReferralToken(c *gin.Context) {
 		UsageLimit:    1,
 		Active:        true,
 	}
-	db := config.DB
-	db.Create(&coupon)
+	if err := tx.Create(&coupon).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to create coupon", err.Error())
+		return
+	}
 
+	// Then create referral with the coupon ID
 	referral := models.Referral{
 		ReferrerUserID: req.UserID,
 		ReferralCode:   referralCode,
-		ReferralToken:  referToken,
+		ReferralToken:  referralCode,
 		CouponID:       coupon.ID,
 	}
-	db.Create(&referral)
+	if err := tx.Create(&referral).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to create referral", err.Error())
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"referral_token_url": "/referral/invite/" + referToken,
-		"referral_code": referralCode,
-		"coupon_code": coupon.Code,
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		utils.InternalServerError(c, "Failed to commit transaction", err.Error())
+		return
+	}
+
+	utils.Success(c, "Referral token generated successfully", gin.H{
+		"referral_token": referralCode,
+		"referral_url":   "/referral/" + referralCode,
+		"coupon_code":    coupon.Code,
 	})
 }
 
@@ -54,16 +105,11 @@ func GenerateReferralToken(c *gin.Context) {
 func GetAllReferrals(c *gin.Context) {
 	var referrals []models.Referral
 	db := config.DB
-	db.Preload("Coupon").Find(&referrals)
-	c.JSON(http.StatusOK, referrals)
-}
-
-// Util: Generate random string
-func RandomString(n int) string {
-	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+	if err := db.Preload("Coupon").Find(&referrals).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch referrals", err.Error())
+		return
 	}
-	return string(b)
+	utils.Success(c, "Referrals retrieved successfully", gin.H{
+		"referrals": referrals,
+	})
 }

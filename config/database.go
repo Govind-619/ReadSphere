@@ -36,11 +36,10 @@ func ConnectDatabase() {
 		&models.PasswordHistory{},
 		&models.UserOTP{},
 		&models.UserActiveCoupon{},
-		// Future models to be added:
-		// &models.Cart{},
-		// &models.Wishlist{},
-		// &models.Order{},
-		// &models.OrderItem{},
+		&models.Cart{},
+		&models.Wishlist{},
+		&models.Order{},
+		&models.OrderItem{},
 	)
 	if err != nil {
 		log.Fatal("Failed to migrate database:", err)

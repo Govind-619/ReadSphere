@@ -11,6 +11,7 @@ import (
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
@@ -34,33 +35,33 @@ func GoogleLogin(c *gin.Context) {
 func GoogleCallback(c *gin.Context) {
 	code := c.Query("code")
 	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No code provided"})
+		utils.BadRequest(c, "No code provided", nil)
 		return
 	}
 
 	token, err := config.GoogleOAuthConfig.Exchange(c, code)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to exchange token: " + err.Error()})
+		utils.InternalServerError(c, "Failed to exchange token", err.Error())
 		return
 	}
 
 	// Get user info from Google
 	resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info: " + err.Error()})
+		utils.InternalServerError(c, "Failed to get user info", err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response: " + err.Error()})
+		utils.InternalServerError(c, "Failed to read response", err.Error())
 		return
 	}
 
 	var googleUser GoogleUserInfo
 	if err := json.Unmarshal(data, &googleUser); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user info: " + err.Error()})
+		utils.InternalServerError(c, "Failed to parse user info", err.Error())
 		return
 	}
 
@@ -82,13 +83,13 @@ func GoogleCallback(c *gin.Context) {
 		password := googleUser.ID[:8] + fmt.Sprintf("%d", time.Now().Unix())
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password: " + err.Error()})
+			utils.InternalServerError(c, "Failed to hash password", err.Error())
 			return
 		}
 		user.Password = string(hashedPassword)
 
 		if err := config.DB.Create(&user).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user: " + err.Error()})
+			utils.InternalServerError(c, "Failed to create user", err.Error())
 			return
 		}
 	}
@@ -102,7 +103,7 @@ func GoogleCallback(c *gin.Context) {
 
 	tokenString, err := jwtToken.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
+		utils.InternalServerError(c, "Failed to generate token", err.Error())
 		return
 	}
 

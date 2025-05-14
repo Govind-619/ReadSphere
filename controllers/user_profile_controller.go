@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 
@@ -21,35 +20,36 @@ import (
 func GetUserProfile(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
 	userModel := user.(models.User)
-	c.JSON(http.StatusOK, gin.H{
-		"username":      userModel.Username,
-		"email":         userModel.Email,
-		"first_name":    userModel.FirstName,
-		"last_name":     userModel.LastName,
-		"phone":         userModel.Phone,
-		"profile_image": userModel.ProfileImage,
-
+	utils.Success(c, "Profile retrieved successfully", gin.H{
+		"user": gin.H{
+			"username":      userModel.Username,
+			"email":         userModel.Email,
+			"first_name":    userModel.FirstName,
+			"last_name":     userModel.LastName,
+			"phone":         userModel.Phone,
+			"profile_image": userModel.ProfileImage,
+		},
 	})
 }
 
 // UpdateProfileRequest represents the profile update request
 type UpdateProfileRequest struct {
-	Username   string `json:"username"`
-	FirstName  string `json:"first_name"`
-	LastName   string `json:"last_name"`
-	Phone      string `json:"phone"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Phone     string `json:"phone"`
 }
 
 // UpdateProfile handles profile updates (excluding email)
 func UpdateProfile(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
@@ -57,7 +57,7 @@ func UpdateProfile(c *gin.Context) {
 
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
@@ -66,13 +66,13 @@ func UpdateProfile(c *gin.Context) {
 	// Username validation and uniqueness
 	if req.Username != "" && req.Username != userModel.Username {
 		if valid, msg := utils.ValidateUsername(req.Username); !valid {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			utils.BadRequest(c, msg, nil)
 			return
 		}
 		// Check uniqueness
 		var existingUser models.User
 		if err := config.DB.Where("username = ? AND id != ?", req.Username, userModel.ID).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+			utils.Conflict(c, "Username already exists", nil)
 			return
 		}
 		updates["username"] = req.Username
@@ -81,7 +81,7 @@ func UpdateProfile(c *gin.Context) {
 	// First name
 	if req.FirstName != "" {
 		if valid, msg := utils.ValidateName(req.FirstName); !valid {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			utils.BadRequest(c, msg, nil)
 			return
 		}
 		updates["first_name"] = strings.TrimSpace(req.FirstName)
@@ -90,7 +90,7 @@ func UpdateProfile(c *gin.Context) {
 	// Last name
 	if req.LastName != "" {
 		if valid, msg := utils.ValidateName(req.LastName); !valid {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			utils.BadRequest(c, msg, nil)
 			return
 		}
 		updates["last_name"] = strings.TrimSpace(req.LastName)
@@ -99,34 +99,50 @@ func UpdateProfile(c *gin.Context) {
 	// Phone validation and uniqueness
 	if req.Phone != "" && req.Phone != userModel.Phone {
 		if valid, msg := utils.ValidatePhone(req.Phone); !valid {
-			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			utils.BadRequest(c, msg, nil)
 			return
 		}
 		// Check uniqueness
 		var existingUser models.User
 		if err := config.DB.Where("phone = ? AND id != ?", req.Phone, userModel.ID).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Phone number already exists"})
+			utils.Conflict(c, "Phone number already exists", nil)
 			return
 		}
 		updates["phone"] = req.Phone
 	}
 
 	if len(updates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No valid fields to update"})
+		utils.BadRequest(c, "No valid fields to update", nil)
 		return
 	}
 
-	// Audit log placeholder
-	// utils.LogAudit(userModel.ID, "profile_update", updates)
-
+	// Update user
 	if err := config.DB.Model(&userModel).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+		utils.InternalServerError(c, "Failed to update profile", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Profile updated successfully",
-		"user":    userModel,
+	// Fetch updated user with wallet information
+	var updatedUser models.User
+	if err := config.DB.Preload("Wallet").First(&updatedUser, userModel.ID).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch updated profile", err.Error())
+		return
+	}
+
+	utils.Success(c, "Profile updated successfully", gin.H{
+		"user": gin.H{
+			"id":            updatedUser.ID,
+			"username":      updatedUser.Username,
+			"email":         updatedUser.Email,
+			"first_name":    updatedUser.FirstName,
+			"last_name":     updatedUser.LastName,
+			"phone":         updatedUser.Phone,
+			"profile_image": updatedUser.ProfileImage,
+			"is_verified":   updatedUser.IsVerified,
+			"wallet": gin.H{
+				"balance": updatedUser.Wallet.Balance,
+			},
+		},
 	})
 }
 
@@ -139,7 +155,7 @@ type UpdateEmailRequest struct {
 func UpdateEmail(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
@@ -147,20 +163,20 @@ func UpdateEmail(c *gin.Context) {
 
 	var req UpdateEmailRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
 	// Validate email
 	if valid, msg := utils.ValidateEmail(req.NewEmail); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		utils.BadRequest(c, msg, nil)
 		return
 	}
 
 	// Check if email already exists
 	var existingUser models.User
 	if err := config.DB.Where("email = ?", req.NewEmail).First(&existingUser).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Email already exists"})
+		utils.Conflict(c, "Email already exists", nil)
 		return
 	}
 
@@ -175,13 +191,13 @@ func UpdateEmail(c *gin.Context) {
 		Code:      otp,
 		ExpiresAt: otpExpiry,
 	}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate verification code"})
+		utils.InternalServerError(c, "Failed to generate verification code", err.Error())
 		return
 	}
 
 	// Send OTP email
 	if err := utils.SendOTP(req.NewEmail, otp); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+		utils.InternalServerError(c, "Failed to send verification email", err.Error())
 		return
 	}
 
@@ -190,8 +206,9 @@ func UpdateEmail(c *gin.Context) {
 	session.Set("new_email", req.NewEmail)
 	session.Save()
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Verification code sent to new email address",
+	utils.Success(c, "Verification code sent to new email address", gin.H{
+		"email":      req.NewEmail,
+		"expires_in": 900, // 15 minutes in seconds
 	})
 }
 
@@ -204,7 +221,7 @@ type VerifyEmailUpdateRequest struct {
 func VerifyEmailUpdate(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
@@ -212,7 +229,7 @@ func VerifyEmailUpdate(c *gin.Context) {
 
 	var req VerifyEmailUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
@@ -220,7 +237,7 @@ func VerifyEmailUpdate(c *gin.Context) {
 	session := sessions.Default(c)
 	newEmail := session.Get("new_email")
 	if newEmail == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Email update not initiated"})
+		utils.BadRequest(c, "Email update not initiated", "Please initiate email update first")
 		return
 	}
 
@@ -228,13 +245,13 @@ func VerifyEmailUpdate(c *gin.Context) {
 	var userOTP models.UserOTP
 	if err := config.DB.Where("user_id = ? AND code = ? AND expires_at > ?",
 		userModel.ID, req.OTP, time.Now()).First(&userOTP).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired OTP"})
+		utils.BadRequest(c, "Invalid or expired OTP", nil)
 		return
 	}
 
 	// Update email
 	if err := config.DB.Model(&userModel).Update("email", newEmail).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update email"})
+		utils.InternalServerError(c, "Failed to update email", err.Error())
 		return
 	}
 
@@ -242,9 +259,11 @@ func VerifyEmailUpdate(c *gin.Context) {
 	session.Delete("new_email")
 	session.Save()
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Email updated successfully",
-		"user":    userModel,
+	utils.Success(c, "Email updated successfully", gin.H{
+		"user": gin.H{
+			"id":    userModel.ID,
+			"email": newEmail,
+		},
 	})
 }
 
@@ -259,7 +278,7 @@ type ChangePasswordRequest struct {
 func ChangePassword(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
@@ -267,31 +286,31 @@ func ChangePassword(c *gin.Context) {
 
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
 	// Verify current password
 	if err := bcrypt.CompareHashAndPassword([]byte(userModel.Password), []byte(req.CurrentPassword)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Current password is incorrect"})
+		utils.Unauthorized(c, "Current password is incorrect")
 		return
 	}
 
 	// Validate new password
 	if valid, msg := utils.ValidatePassword(req.NewPassword); !valid {
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		utils.BadRequest(c, msg, nil)
 		return
 	}
 
 	// Check if new password matches confirm password
 	if req.NewPassword != req.ConfirmPassword {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "New password and confirm password do not match"})
+		utils.BadRequest(c, "New password and confirm password do not match", nil)
 		return
 	}
 
 	// Check if new password is same as current password
 	if err := bcrypt.CompareHashAndPassword([]byte(userModel.Password), []byte(req.NewPassword)); err == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "New password cannot be the same as current password"})
+		utils.BadRequest(c, "New password cannot be the same as current password", nil)
 		return
 	}
 
@@ -300,7 +319,7 @@ func ChangePassword(c *gin.Context) {
 	if err := config.DB.Where("user_id = ?", userModel.ID).Order("created_at DESC").Limit(3).Find(&passwordHistory).Error; err == nil {
 		for _, history := range passwordHistory {
 			if err := bcrypt.CompareHashAndPassword([]byte(history.Password), []byte(req.NewPassword)); err == nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "This password has been used recently"})
+				utils.BadRequest(c, "This password has been used recently", "Please choose a different password that hasn't been used in your last 3 passwords")
 				return
 			}
 		}
@@ -309,21 +328,21 @@ func ChangePassword(c *gin.Context) {
 	// Hash new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		utils.InternalServerError(c, "Failed to hash password", err.Error())
 		return
 	}
 
 	// Start transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
 	// Update password
 	if err := tx.Model(&userModel).Update("password", string(hashedPassword)).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		utils.InternalServerError(c, "Failed to update password", err.Error())
 		return
 	}
 
@@ -334,18 +353,24 @@ func ChangePassword(c *gin.Context) {
 	}
 	if err := tx.Create(&passwordHistoryEntry).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password history"})
+		utils.InternalServerError(c, "Failed to update password history", err.Error())
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Password changed successfully",
+	utils.Success(c, "Password changed successfully", gin.H{
+		"user": gin.H{
+			"id": userModel.ID,
+		},
+		"redirect": gin.H{
+			"url":     "/login",
+			"message": "Please login again with your new password",
+		},
 	})
 }
 
@@ -353,7 +378,7 @@ func ChangePassword(c *gin.Context) {
 func UploadProfileImage(c *gin.Context) {
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
@@ -362,21 +387,21 @@ func UploadProfileImage(c *gin.Context) {
 	// Get the file from the request
 	file, err := c.FormFile("image")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		utils.BadRequest(c, "No file uploaded", "Please select an image file to upload")
 		return
 	}
 
 	// Validate file type
 	ext := filepath.Ext(file.Filename)
 	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type. Only jpg, jpeg, and png files are allowed"})
+		utils.BadRequest(c, "Invalid file type", "Only jpg, jpeg, and png files are allowed")
 		return
 	}
 
 	// Create uploads directory if it doesn't exist
 	uploadDir := "uploads/profile_images"
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+		utils.InternalServerError(c, "Failed to create upload directory", err.Error())
 		return
 	}
 
@@ -385,18 +410,20 @@ func UploadProfileImage(c *gin.Context) {
 
 	// Save the file
 	if err := c.SaveUploadedFile(file, filename); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		utils.InternalServerError(c, "Failed to save file", err.Error())
 		return
 	}
 
 	// Update user's profile image
 	if err := config.DB.Model(&userModel).Update("profile_image", filename).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile image"})
+		utils.InternalServerError(c, "Failed to update profile image", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "Profile image uploaded successfully",
-		"image_url": filename,
+	utils.Success(c, "Profile image uploaded successfully", gin.H{
+		"user": gin.H{
+			"id":            userModel.ID,
+			"profile_image": filename,
+		},
 	})
 }

@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"strings"
 
 	"github.com/Govind-619/ReadSphere/models"
 
@@ -46,6 +48,131 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
+// MigrateCategoryNames standardizes category names and removes duplicates
+func MigrateCategoryNames(db *gorm.DB) error {
+	// Start transaction
+	tx := db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	// Drop any existing indexes on the name column
+	if err := tx.Exec(`DROP INDEX IF EXISTS idx_categories_name_lower`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Exec(`DROP INDEX IF EXISTS categories_name_key`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+	if err := tx.Exec(`DROP INDEX IF EXISTS idx_categories_name`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Get all categories
+	var categories []models.Category
+	if err := tx.Find(&categories).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Process categories and handle duplicates
+	seen := make(map[string]*models.Category)
+	for i := range categories {
+		cat := &categories[i]
+		normalizedName := strings.TrimSpace(cat.Name)
+		lowerName := strings.ToLower(normalizedName)
+
+		if existing, exists := seen[lowerName]; exists {
+			// Update books to use the first category we saw
+			if err := tx.Model(&models.Book{}).Where("category_id = ?", cat.ID).Update("category_id", existing.ID).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+			// Mark for deletion by setting DeletedAt
+			if err := tx.Delete(cat).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+		} else {
+			// Update the name to be standardized
+			cat.Name = normalizedName
+			if err := tx.Save(cat).Error; err != nil {
+				tx.Rollback()
+				return err
+			}
+			seen[lowerName] = cat
+		}
+	}
+
+	// Create the case-insensitive unique index
+	if err := tx.Exec(`CREATE UNIQUE INDEX idx_categories_name_lower ON categories (LOWER(name)) WHERE deleted_at IS NULL`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit().Error
+}
+
+// CleanupInvalidReferrals removes any referral records that reference non-existent coupons
+func CleanupInvalidReferrals() error {
+	// Check if referrals table exists
+	if !DB.Migrator().HasTable("referrals") {
+		return nil
+	}
+
+	// Delete referrals with invalid coupon_id
+	result := DB.Exec(`
+		DELETE FROM referrals 
+		WHERE coupon_id NOT IN (SELECT id FROM coupons)
+	`)
+	if result.Error != nil {
+		log.Printf("Failed to cleanup invalid referrals: %v", result.Error)
+		return result.Error
+	}
+
+	if result.RowsAffected > 0 {
+		log.Printf("Cleaned up %d invalid referral records", result.RowsAffected)
+	}
+	return nil
+}
+
+// MigrateDB migrates the database
+func MigrateDB() error {
+	// Clean up invalid referrals before migration
+	if err := CleanupInvalidReferrals(); err != nil {
+		log.Printf("Warning: Failed to cleanup invalid referrals: %v", err)
+		// Continue with migration even if cleanup fails
+	}
+
+	// AutoMigrate will create tables, missing foreign keys, constraints, columns and indexes
+	if err := DB.AutoMigrate(
+		&models.User{},
+		&models.Admin{},
+		&models.Book{},
+		&models.Category{},
+		&models.Cart{},
+		&models.Address{},
+		&models.Order{},
+		&models.OrderItem{},
+		&models.Wishlist{},
+		&models.Coupon{},   // Migrate Coupon first
+		&models.Referral{}, // Then Referral which depends on Coupon
+		&models.ReferralSignup{},
+		&models.ProductOffer{},
+		&models.CategoryOffer{},
+		&models.Wallet{},
+		&models.WalletTransaction{},
+		&models.WalletTopupOrder{},
+	); err != nil {
+		log.Printf("Failed to migrate database: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 // InitDB initializes the database connection
 func InitDB() {
 	config, err := LoadConfig()
@@ -53,15 +180,23 @@ func InitDB() {
 		panic(fmt.Sprintf("Failed to load config: %v", err))
 	}
 
-	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
+		config.DBHost, config.DBUser, config.DBPassword, config.DBName, config.DBPort)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		panic(fmt.Sprintf("Failed to connect to database: %v", err))
+		log.Fatal("Failed to connect to database:", err)
 	}
 
-	DB = db
+	// Run category migration first
+	if err := MigrateCategoryNames(DB); err != nil {
+		log.Fatal("Failed to migrate category names:", err)
+	}
+
+	// Then run the regular migrations
+	if err := MigrateDB(); err != nil {
+		log.Fatal("Failed to migrate database:", err)
+	}
 
 	// First, check if the username column exists
 	var columnExists bool
@@ -99,36 +234,6 @@ func InitDB() {
 		if err != nil {
 			panic(fmt.Sprintf("Failed to make username NOT NULL: %v", err))
 		}
-	}
-
-	// Auto-migrate the schema for other changes
-	err = DB.AutoMigrate(
-		&models.User{},
-		&models.Admin{},
-		&models.Category{},
-		&models.Genre{},
-		&models.Book{},
-		&models.Review{},
-		&models.PasswordHistory{},
-		&models.UserOTP{},
-		&models.Cart{},
-		&models.Wishlist{},
-		&models.Order{},
-		&models.OrderItem{},
-		&models.Address{},
-		&models.BookImage{},
-		&models.Coupon{},
-		&models.UserCoupon{},
-		&models.UserActiveCoupon{},
-		&models.Wallet{},
-		&models.WalletTransaction{},
-		&models.ProductOffer{},
-		&models.CategoryOffer{},
-		&models.Referral{},
-		&models.ReferralSignup{},
-	)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to migrate database: %v", err))
 	}
 
 	// Update GoogleID column to be nullable

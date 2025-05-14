@@ -3,12 +3,10 @@ package controllers
 import (
 	"fmt"
 	"log"
-	"net/http"
-	"strings"
-	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,14 +18,14 @@ func UpdateBookByField(c *gin.Context) {
 	admin, exists := c.Get("admin")
 	if !exists {
 		log.Printf("Admin not found in context")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
+		utils.Unauthorized(c, "Admin not found in context")
 		return
 	}
 
 	adminModel, ok := admin.(models.Admin)
 	if !ok {
 		log.Printf("Invalid admin type in context")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
+		utils.InternalServerError(c, "Invalid admin type", nil)
 		return
 	}
 
@@ -39,17 +37,17 @@ func UpdateBookByField(c *gin.Context) {
 
 	if fieldName == "" || fieldValue == "" {
 		log.Printf("Field name or value not provided in URL")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Field name and value are required"})
+		utils.BadRequest(c, "Field name and value are required", nil)
 		return
 	}
 
 	log.Printf("Updating book with %s: %s", fieldName, fieldValue)
 
-	// Check if book exists and preload BookBookImages
+	// Check if book exists
 	var book models.Book
-	if err := config.DB.Preload("BookBookImages").Where(fieldName+" = ? AND deleted_at IS NULL", fieldValue).First(&book).Error; err != nil {
+	if err := config.DB.Where(fmt.Sprintf("%s = ?", fieldName), fieldValue).First(&book).Error; err != nil {
 		log.Printf("Book not found: %v", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+		utils.NotFound(c, "Book not found")
 		return
 	}
 
@@ -59,7 +57,7 @@ func UpdateBookByField(c *gin.Context) {
 	var updateData map[string]interface{}
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		log.Printf("Invalid input: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		utils.BadRequest(c, "Invalid input", err.Error())
 		return
 	}
 
@@ -86,14 +84,30 @@ func UpdateBookByField(c *gin.Context) {
 	}
 
 	if categoryID, ok := updateData["category_id"].(float64); ok && categoryID > 0 {
+		// Verify category exists
+		var category models.Category
+		if err := config.DB.First(&category, uint(categoryID)).Error; err != nil {
+			utils.BadRequest(c, "Invalid category ID", "The specified category does not exist")
+			return
+		}
 		updates["category_id"] = uint(categoryID)
+	}
+
+	if genreID, ok := updateData["genre_id"].(float64); ok && genreID > 0 {
+		// Verify genre exists
+		var genre models.Genre
+		if err := config.DB.First(&genre, uint(genreID)).Error; err != nil {
+			utils.BadRequest(c, "Invalid genre ID", "The specified genre does not exist")
+			return
+		}
+		updates["genre_id"] = uint(genreID)
 	}
 
 	if imageURL, ok := updateData["image_url"].(string); ok && imageURL != "" {
 		updates["image_url"] = imageURL
 	}
 
-	// Handle images array separately (match UpdateBook convention)
+	// Handle images array separately
 	if images, ok := updateData["images"].([]interface{}); ok {
 		// Convert []interface{} to []string
 		imageURLs := make([]string, len(images))
@@ -106,7 +120,7 @@ func UpdateBookByField(c *gin.Context) {
 		// Delete existing BookImages for this book
 		if err := config.DB.Where("book_id = ?", book.ID).Delete(&models.BookImage{}).Error; err != nil {
 			log.Printf("Failed to delete old BookImages: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update images"})
+			utils.InternalServerError(c, "Failed to update images", err.Error())
 			return
 		}
 		// Insert new BookImages
@@ -114,7 +128,7 @@ func UpdateBookByField(c *gin.Context) {
 			if url != "" {
 				if err := config.DB.Create(&models.BookImage{BookID: book.ID, URL: url}).Error; err != nil {
 					log.Printf("Failed to insert BookImage: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update images"})
+					utils.InternalServerError(c, "Failed to update images", err.Error())
 					return
 				}
 			}
@@ -142,7 +156,7 @@ func UpdateBookByField(c *gin.Context) {
 		var existingBook models.Book
 		if err := config.DB.Where("isbn = ? AND id != ? AND deleted_at IS NULL", isbn, book.ID).First(&existingBook).Error; err == nil {
 			log.Printf("ISBN already exists in an active book: %s", isbn)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
+			utils.BadRequest(c, "A book with this ISBN already exists", nil)
 			return
 		}
 		updates["isbn"] = isbn
@@ -152,30 +166,8 @@ func UpdateBookByField(c *gin.Context) {
 		updates["publication_year"] = int(publicationYear)
 	}
 
-	if genreID, ok := updateData["genre_id"].(float64); ok && genreID > 0 {
-		updates["genre_id"] = uint(genreID)
-	}
-
 	if pages, ok := updateData["pages"].(float64); ok && pages > 0 {
 		updates["pages"] = int(pages)
-	}
-
-	if originalPrice, ok := updateData["original_price"].(float64); ok && originalPrice > 0 {
-		updates["original_price"] = originalPrice
-	}
-
-	if discountPercentage, ok := updateData["discount_percentage"].(float64); ok && discountPercentage >= 0 && discountPercentage <= 100 {
-		updates["discount_percentage"] = discountPercentage
-	}
-
-	if discountEndDate, ok := updateData["discount_end_date"].(string); ok && discountEndDate != "" {
-		parsedDate, err := time.Parse(time.RFC3339, discountEndDate)
-		if err != nil {
-			log.Printf("Invalid discount end date format: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid discount end date format"})
-			return
-		}
-		updates["discount_end_date"] = parsedDate
 	}
 
 	if language, ok := updateData["language"].(string); ok && language != "" {
@@ -186,70 +178,67 @@ func UpdateBookByField(c *gin.Context) {
 		updates["format"] = format
 	}
 
-	// Update the book with only the provided fields (excluding BookImages which we already updated)
+	// Update the book with only the provided fields
 	if len(updates) > 0 {
 		log.Printf("Updating book with fields: %+v", updates)
-
-		// Use a raw SQL // query (REMOVED: variable not defined) to update the book with the provided fields
-		updateQuery := "UPDATE books SET "
-		updateParams := []interface{}{}
-
-		// Build the SET clause
-		setClauses := []string{}
-		for field, value := range updates {
-			setClauses = append(setClauses, fmt.Sprintf("%s = ?", field))
-			updateParams = append(updateParams, value)
-		}
-
-		// Add updated_at timestamp
-		setClauses = append(setClauses, "updated_at = ?")
-		updateParams = append(updateParams, time.Now())
-
-		updateQuery += strings.Join(setClauses, ", ")
-
-		// Add WHERE clause with ID
-		updateQuery += " WHERE id = ?"
-		updateParams = append(updateParams, book.ID)
-
-		// Execute the update // query (REMOVED: variable not defined)
-		if err := config.DB.Exec(updateQuery, updateParams...).Error; err != nil {
+		if err := config.DB.Model(&book).Updates(updates).Error; err != nil {
 			log.Printf("Failed to update book: %v", err)
-
-			// Check for unique constraint violation (ISBN)
-			if strings.Contains(err.Error(), "unique constraint") || strings.Contains(err.Error(), "duplicate key") {
-				log.Printf("ISBN already exists: %s", updates["isbn"])
-				c.JSON(http.StatusBadRequest, gin.H{"error": "A book with this ISBN already exists"})
-				return
-			}
-
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update book: " + err.Error()})
+			utils.InternalServerError(c, "Failed to update book", err.Error())
 			return
 		}
 	}
 
-	// Fetch the updated book with explicit error handling
+	// Fetch the updated book with related data
 	var updatedBook models.Book
-	// Fetch the updated book using GORM Preload
-	if err := config.DB.Preload("BookImages").First(&updatedBook, book.ID).Error; err != nil {
+	if err := config.DB.Preload("Category").Preload("Genre").Preload("BookImages").First(&updatedBook, book.ID).Error; err != nil {
 		log.Printf("Failed to fetch updated book: %v", err)
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Book updated, but failed to fetch updated details",
-			"book":    book,
+		utils.Success(c, "Book updated, but failed to fetch updated details", gin.H{
+			"book": book,
 		})
 		return
 	}
 
-	// Build images array for response
-	images := []string{}
-	for _, img := range updatedBook.BookImages {
-		images = append(images, img.URL)
+	// Create clean response
+	response := gin.H{
+		"id":               updatedBook.ID,
+		"name":             updatedBook.Name,
+		"description":      updatedBook.Description,
+		"price":            updatedBook.Price,
+		"original_price":   updatedBook.OriginalPrice,
+		"stock":            updatedBook.Stock,
+		"image_url":        updatedBook.ImageURL,
+		"is_active":        updatedBook.IsActive,
+		"is_featured":      updatedBook.IsFeatured,
+		"author":           updatedBook.Author,
+		"publisher":        updatedBook.Publisher,
+		"isbn":             updatedBook.ISBN,
+		"publication_year": updatedBook.PublicationYear,
+		"pages":            updatedBook.Pages,
+		"language":         updatedBook.Language,
+		"format":           updatedBook.Format,
+		"created_at":       updatedBook.CreatedAt,
+		"updated_at":       updatedBook.UpdatedAt,
+		"category": gin.H{
+			"id":          updatedBook.Category.ID,
+			"name":        updatedBook.Category.Name,
+			"description": updatedBook.Category.Description,
+		},
+		"genre": gin.H{
+			"id":          updatedBook.Genre.ID,
+			"name":        updatedBook.Genre.Name,
+			"description": updatedBook.Genre.Description,
+		},
 	}
 
+	// Add images to response
+	imageUrls := make([]string, 0)
+	for _, img := range updatedBook.BookImages {
+		imageUrls = append(imageUrls, img.URL)
+	}
+	response["images"] = imageUrls
+
 	log.Printf("Book updated successfully: %s", updatedBook.Name)
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Book updated successfully",
-		"book":    updatedBook,
-		"images":  images,
-		"note":    "Price is in Indian Rupees (INR)",
+	utils.Success(c, "Book updated successfully", gin.H{
+		"book": response,
 	})
 }

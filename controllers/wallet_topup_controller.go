@@ -5,40 +5,43 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 	razorpay "github.com/razorpay/razorpay-go"
 )
 
 // InitiateWalletTopup initiates a payment to add money to the wallet
 func InitiateWalletTopup(c *gin.Context) {
-	fmt.Println("InitiateWalletTopup endpoint called")
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
-	user := userVal.(models.User)
+	user, ok := userVal.(models.User)
+	if !ok {
+		utils.BadRequest(c, "Invalid user in context", nil)
+		return
+	}
 	userID := user.ID
 
 	var req struct {
 		Amount float64 `json:"amount" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request. Amount is required and must be positive", "details": err.Error()})
+		utils.BadRequest(c, "Invalid request. Amount is required and must be positive", err.Error())
 		return
 	}
 
 	// Get or create wallet
 	wallet, err := getOrCreateWallet(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
+		utils.InternalServerError(c, "Failed to get wallet", err.Error())
 		return
 	}
 
@@ -54,28 +57,25 @@ func InitiateWalletTopup(c *gin.Context) {
 	}
 	rzOrder, err := client.Order.Create(orderData, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create Razorpay order", "details": err.Error()})
+		utils.InternalServerError(c, "Failed to create Razorpay order", err.Error())
 		return
 	}
 
 	// Save WalletTopupOrder in DB
 	walletTopupOrder := models.WalletTopupOrder{
-		UserID: userID,
+		UserID:          userID,
 		RazorpayOrderID: fmt.Sprintf("%v", rzOrder["id"]),
-		Amount: req.Amount,
-		Status: "pending",
+		Amount:          req.Amount,
+		Status:          "pending",
 	}
 	if err := config.DB.Create(&walletTopupOrder).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record wallet topup order", "details": err.Error()})
+		utils.InternalServerError(c, "Failed to record wallet topup order", err.Error())
 		return
 	}
 
-
-	c.JSON(http.StatusOK, gin.H{
+	utils.Success(c, "Wallet topup order created successfully", gin.H{
 		"razorpay_order_id": rzOrder["id"],
-		"amount":            rzOrder["amount"],
 		"amount_display":    "₹" + fmt.Sprintf("%.2f", float64(amountPaise)/100),
-		"currency":          rzOrder["currency"],
 		"key":               os.Getenv("RAZORPAY_KEY"),
 		"user": gin.H{
 			"name":  user.Username,
@@ -91,13 +91,16 @@ func InitiateWalletTopup(c *gin.Context) {
 
 // VerifyWalletTopup verifies the payment and adds money to the wallet
 func VerifyWalletTopup(c *gin.Context) {
-	fmt.Println("VerifyWalletTopup endpoint called")
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
-	user := userVal.(models.User)
+	user, ok := userVal.(models.User)
+	if !ok {
+		utils.BadRequest(c, "Invalid user in context", nil)
+		return
+	}
 	userID := user.ID
 
 	var req struct {
@@ -106,7 +109,7 @@ func VerifyWalletTopup(c *gin.Context) {
 		RazorpaySignature string `json:"razorpay_signature" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request", "details": err.Error()})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 
@@ -114,7 +117,7 @@ func VerifyWalletTopup(c *gin.Context) {
 	var walletTopupOrder models.WalletTopupOrder
 	err := config.DB.Where("razorpay_order_id = ?", req.RazorpayOrderID).First(&walletTopupOrder).Error
 	if err != nil || walletTopupOrder.Amount <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Unable to fetch wallet topup amount for this order_id"})
+		utils.BadRequest(c, "Unable to fetch wallet topup amount for this order_id", nil)
 		return
 	}
 	amount := walletTopupOrder.Amount
@@ -126,14 +129,14 @@ func VerifyWalletTopup(c *gin.Context) {
 	h.Write([]byte(data))
 	generatedSignature := hex.EncodeToString(h.Sum(nil))
 	if generatedSignature != req.RazorpaySignature {
-		c.JSON(http.StatusBadRequest, gin.H{"status": "failure", "message": "Payment verification failed", "retry": true})
+		utils.BadRequest(c, "Payment verification failed", gin.H{"retry": true})
 		return
 	}
 
 	// Start a transaction
 	tx := config.DB.Begin()
 	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to begin transaction"})
+		utils.InternalServerError(c, "Failed to begin transaction", tx.Error.Error())
 		return
 	}
 
@@ -141,7 +144,7 @@ func VerifyWalletTopup(c *gin.Context) {
 	wallet, err := getOrCreateWallet(userID)
 	if err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
+		utils.InternalServerError(c, "Failed to get wallet", err.Error())
 		return
 	}
 
@@ -152,37 +155,43 @@ func VerifyWalletTopup(c *gin.Context) {
 	transaction, err := createWalletTransaction(wallet.ID, amount, models.TransactionTypeCredit, description, nil, reference)
 	if err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction"})
+		utils.InternalServerError(c, "Failed to create transaction", err.Error())
 		return
 	}
 
 	// Update wallet balance
 	if err := updateWalletBalance(wallet.ID, amount, models.TransactionTypeCredit); err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update wallet balance"})
+		utils.InternalServerError(c, "Failed to update wallet balance", err.Error())
+		return
+	}
+
+	// Update wallet topup order status
+	walletTopupOrder.Status = "completed"
+	if err := tx.Save(&walletTopupOrder).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to update topup order status", err.Error())
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		utils.InternalServerError(c, "Failed to commit transaction", err.Error())
 		return
 	}
 
 	// Get updated wallet
 	updatedWallet, err := getOrCreateWallet(userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get updated wallet"})
+		utils.InternalServerError(c, "Failed to get updated wallet", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status":           "success",
-		"message":          "Money added to wallet successfully!",
+	utils.Success(c, "Money added to wallet successfully!", gin.H{
 		"amount_added":     fmt.Sprintf("%.2f", amount),
 		"wallet_balance":   fmt.Sprintf("%.2f", updatedWallet.Balance),
 		"transaction_id":   transaction.ID,
-		"transaction_date": transaction.CreatedAt,
+		"transaction_date": transaction.CreatedAt.Format("2006-01-02 15:04:05"),
 		"reference":        reference,
 	})
 }

@@ -40,15 +40,6 @@ type Admin struct {
 	IsActive  bool      `json:"is_active" gorm:"default:true"`
 }
 
-// Category represents a product category
-type Category struct {
-	gorm.Model
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Books       []Book `json:"books,omitempty"`
-	Blocked     bool   `json:"blocked" gorm:"default:false"`
-}
-
 // Genre represents a book genre
 type Genre struct {
 	gorm.Model

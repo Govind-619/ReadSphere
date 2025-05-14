@@ -8,46 +8,53 @@ import (
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 // GetWalletBalance returns the user's wallet balance
 func GetWalletBalance(c *gin.Context) {
-	// Get user from context
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
-	user := userVal.(models.User)
+	user, ok := userVal.(models.User)
+	if !ok {
+		utils.BadRequest(c, "Invalid user in context", nil)
+		return
+	}
 
 	// Get or create wallet
 	wallet, err := getOrCreateWallet(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
+		utils.InternalServerError(c, "Failed to get wallet", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.Success(c, "Wallet balance retrieved successfully", gin.H{
 		"balance": fmt.Sprintf("%.2f", wallet.Balance),
 	})
 }
 
 // GetWalletTransactions returns the user's wallet transactions
 func GetWalletTransactions(c *gin.Context) {
-	// Get user from context
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		utils.Unauthorized(c, "User not found")
 		return
 	}
-	user := userVal.(models.User)
+	user, ok := userVal.(models.User)
+	if !ok {
+		utils.BadRequest(c, "Invalid user in context", nil)
+		return
+	}
 
 	// Get or create wallet
 	wallet, err := getOrCreateWallet(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
+		utils.InternalServerError(c, "Failed to get wallet", err.Error())
 		return
 	}
 
@@ -66,12 +73,12 @@ func GetWalletTransactions(c *gin.Context) {
 	var transactions []models.WalletTransaction
 	var total int64
 	if err := config.DB.Model(&models.WalletTransaction{}).Where("wallet_id = ?", wallet.ID).Count(&total).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count transactions"})
+		utils.InternalServerError(c, "Failed to count transactions", err.Error())
 		return
 	}
 
 	if err := config.DB.Where("wallet_id = ?", wallet.ID).Order("created_at DESC").Limit(limit).Offset(offset).Find(&transactions).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get transactions"})
+		utils.InternalServerError(c, "Failed to get transactions", err.Error())
 		return
 	}
 
@@ -84,145 +91,21 @@ func GetWalletTransactions(c *gin.Context) {
 			"type":        txn.Type,
 			"description": txn.Description,
 			"reference":   txn.Reference,
-			"created_at":  txn.CreatedAt,
+			"created_at":  txn.CreatedAt.Format("2006-01-02 15:04:05"),
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.SuccessWithPagination(c, "Wallet transactions retrieved successfully", gin.H{
 		"transactions": formattedTransactions,
-		"total":        total,
-		"page":         page,
-		"limit":        limit,
-		"pages":        (total + int64(limit) - 1) / int64(limit),
-	})
+		"wallet": gin.H{
+			"balance": fmt.Sprintf("%.2f", wallet.Balance),
+		},
+	}, total, page, limit)
 }
 
-// DEPRECATED: ProcessOrderCancellation has been merged into CancelOrder in order_controller.go
-// This function is kept for reference but should not be used
-// Use controllers.CancelOrder instead for all order cancellations with wallet refunds
+// ProcessOrderCancellation has been deprecated and merged into CancelOrder
 func ProcessOrderCancellation(c *gin.Context) {
-	// Return a deprecation notice
-	c.JSON(http.StatusGone, gin.H{
-		"error": "This endpoint is deprecated. Please use /user/orders/:id/cancel instead.",
-	})
-
-	/* Original function code is commented out for reference
-	// Get user from context
-	userVal, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
-		return
-	}
-	user := userVal.(models.User)
-
-	// Parse order ID
-	orderID, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID"})
-		return
-	}
-
-	// Get the order
-	var order models.Order
-	if err := config.DB.Where("id = ? AND user_id = ?", orderID, user.ID).First(&order).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Order not found"})
-		return
-	}
-
-	// Check if order can be cancelled
-	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusProcessing {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Order cannot be cancelled at this stage"})
-		return
-	}
-
-	// Parse cancellation reason
-	var req struct {
-		Reason string `json:"reason" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Reason is required"})
-		return
-	}
-
-	// Start a transaction
-	tx := config.DB.Begin()
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to begin transaction"})
-		return
-	}
-
-	// Update order status
-	order.Status = models.OrderStatusCancelled
-	order.CancellationReason = req.Reason
-	order.RefundStatus = "pending"
-	order.RefundAmount = order.FinalTotal
-	order.RefundedToWallet = true
-
-	if err := tx.Save(&order).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order"})
-		return
-	}
-
-	// Get or create wallet
-	wallet, err := getOrCreateWallet(user.ID)
-	if err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get wallet"})
-		return
-	}
-
-	// Create a wallet transaction
-	orderIDUint := uint(orderID)
-	reference := fmt.Sprintf("REFUND-ORDER-%d", orderID)
-	description := fmt.Sprintf("Refund for cancelled order #%d", orderID)
-
-	transaction, err := createWalletTransaction(wallet.ID, order.FinalTotal, models.TransactionTypeCredit, description, &orderIDUint, reference)
-	if err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction"})
-		return
-	}
-
-	// Update wallet balance
-	if err := updateWalletBalance(wallet.ID, order.FinalTotal, models.TransactionTypeCredit); err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update wallet balance"})
-		return
-	}
-
-	// Update order refund status
-	now := time.Now()
-	order.RefundStatus = "completed"
-	order.RefundedAt = &now
-
-	if err := tx.Save(&order).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order refund status"})
-		return
-	}
-
-	// Commit transaction
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Order cancelled and refunded to wallet",
-		"order": gin.H{
-			"id":            order.ID,
-			"status":        order.Status,
-			"refund_amount": order.RefundAmount,
-			"refund_status": order.RefundStatus,
-			"refunded_at":   order.RefundedAt,
-		},
-		"transaction": transaction,
-		"wallet": gin.H{
-			"balance": wallet.Balance,
-		},
-	})
-	*/
+	utils.BadRequest(c, "This endpoint is deprecated. Please use /user/orders/:id/cancel instead", nil)
 }
 
 // Admin endpoint to approve return and process refund
@@ -397,4 +280,63 @@ func RejectOrderReturn(c *gin.Context) {
 			"return_reject_reason": order.ReturnRejectReason,
 		},
 	})
+}
+
+// Helper function to get or create a wallet for a user
+func getOrCreateWallet(userID uint) (*models.Wallet, error) {
+	var wallet models.Wallet
+	err := config.DB.Where("user_id = ?", userID).First(&wallet).Error
+	if err != nil {
+		// Wallet doesn't exist, create one
+		wallet = models.Wallet{
+			UserID:  userID,
+			Balance: 0,
+		}
+		if err := config.DB.Create(&wallet).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &wallet, nil
+}
+
+// Helper function to create a wallet transaction
+func createWalletTransaction(walletID uint, amount float64, transactionType string, description string, orderID *uint, reference string) (*models.WalletTransaction, error) {
+	transaction := models.WalletTransaction{
+		WalletID:    walletID,
+		Amount:      amount,
+		Type:        transactionType,
+		Description: description,
+		OrderID:     orderID,
+		Reference:   reference,
+		Status:      models.TransactionStatusCompleted,
+	}
+
+	if err := config.DB.Create(&transaction).Error; err != nil {
+		return nil, err
+	}
+
+	return &transaction, nil
+}
+
+// Helper function to update wallet balance
+func updateWalletBalance(walletID uint, amount float64, transactionType string) error {
+	var wallet models.Wallet
+	if err := config.DB.First(&wallet, walletID).Error; err != nil {
+		return err
+	}
+
+	if transactionType == models.TransactionTypeCredit {
+		wallet.Balance += amount
+	} else if transactionType == models.TransactionTypeDebit {
+		if wallet.Balance < amount {
+			return fmt.Errorf("insufficient balance")
+		}
+		wallet.Balance -= amount
+	}
+
+	if err := config.DB.Save(&wallet).Error; err != nil {
+		return err
+	}
+
+	return nil
 }

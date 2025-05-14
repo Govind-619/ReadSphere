@@ -1,14 +1,13 @@
 package controllers
 
 import (
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
-
 )
 
 // AdminListProductsWithStock shows products with stock, filter, sort, pagination
@@ -39,17 +38,24 @@ func AdminListProductsWithStock(c *gin.Context) {
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if page < 1 { page = 1 }
-	if limit < 1 { limit = 20 }
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
 	var total int64
 	query.Model(&models.Book{}).Count(&total)
-	query.Offset((page-1)*limit).Limit(limit).Find(&products)
+	query.Offset((page - 1) * limit).Limit(limit).Find(&products)
 
-	c.JSON(http.StatusOK, gin.H{
+	utils.Success(c, "Products retrieved successfully", gin.H{
 		"products": products,
-		"total": total,
-		"page": page,
-		"limit": limit,
+		"pagination": gin.H{
+			"total":       total,
+			"page":        page,
+			"limit":       limit,
+			"total_pages": (total + int64(limit) - 1) / int64(limit),
+		},
 	})
 }
 
@@ -57,66 +63,98 @@ func AdminListProductsWithStock(c *gin.Context) {
 func AdminBlockProduct(c *gin.Context) {
 	productID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID"})
+		utils.BadRequest(c, "Invalid product ID", err.Error())
 		return
 	}
+
 	var book models.Book
 	if err := config.DB.First(&book, productID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		utils.NotFound(c, "Product not found")
 		return
 	}
+
 	book.Blocked = true
-	config.DB.Save(&book)
-	c.JSON(http.StatusOK, gin.H{"message": "Product blocked/unlisted", "product": book})
+	if err := config.DB.Save(&book).Error; err != nil {
+		utils.InternalServerError(c, "Failed to block product", err.Error())
+		return
+	}
+
+	utils.Success(c, "Product blocked successfully", gin.H{
+		"product": book,
+	})
 }
 
 // AdminUnblockProduct unblocks a product
 func AdminUnblockProduct(c *gin.Context) {
 	productID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID"})
+		utils.BadRequest(c, "Invalid product ID", err.Error())
 		return
 	}
+
 	var book models.Book
 	if err := config.DB.First(&book, productID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Product not found"})
+		utils.NotFound(c, "Product not found")
 		return
 	}
+
 	book.Blocked = false
-	config.DB.Save(&book)
-	c.JSON(http.StatusOK, gin.H{"message": "Product unblocked/listed", "product": book})
+	if err := config.DB.Save(&book).Error; err != nil {
+		utils.InternalServerError(c, "Failed to unblock product", err.Error())
+		return
+	}
+
+	utils.Success(c, "Product unblocked successfully", gin.H{
+		"product": book,
+	})
 }
 
 // AdminBlockCategory blocks/unlists a category
 func AdminBlockCategory(c *gin.Context) {
 	catID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
+		utils.BadRequest(c, "Invalid category ID", err.Error())
 		return
 	}
+
 	var cat models.Category
 	if err := config.DB.First(&cat, catID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+		utils.NotFound(c, "Category not found")
 		return
 	}
+
 	cat.Blocked = true
-	config.DB.Save(&cat)
-	c.JSON(http.StatusOK, gin.H{"message": "Category blocked/unlisted", "category": cat})
+	if err := config.DB.Save(&cat).Error; err != nil {
+		utils.InternalServerError(c, "Failed to block category", err.Error())
+		return
+	}
+
+	utils.Success(c, "Category blocked successfully", gin.H{
+		"category": cat,
+	})
 }
 
 // AdminUnblockCategory unblocks a category
 func AdminUnblockCategory(c *gin.Context) {
 	catID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid category ID"})
+		utils.BadRequest(c, "Invalid category ID", err.Error())
 		return
 	}
+
 	var cat models.Category
 	if err := config.DB.First(&cat, catID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Category not found"})
+		utils.NotFound(c, "Category not found")
 		return
 	}
+
 	cat.Blocked = false
-	config.DB.Save(&cat)
-	c.JSON(http.StatusOK, gin.H{"message": "Category unblocked/listed", "category": cat})
+	if err := config.DB.Save(&cat).Error; err != nil {
+		utils.InternalServerError(c, "Failed to unblock category", err.Error())
+		return
+	}
+
+	utils.Success(c, "Category unblocked successfully", gin.H{
+		"category": cat,
+	})
 }

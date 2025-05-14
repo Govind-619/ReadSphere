@@ -4,9 +4,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
 	"os"
 
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,7 +22,7 @@ func SimulatePayment(c *gin.Context) {
 	// Get order ID from query parameter
 	orderID := c.Query("order_id")
 	if orderID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Order ID is required"})
+		utils.BadRequest(c, "Order ID is required", nil)
 		return
 	}
 
@@ -36,10 +36,10 @@ func SimulatePayment(c *gin.Context) {
 	h.Write([]byte(data))
 	signature := hex.EncodeToString(h.Sum(nil))
 
-	// Return simulated payment details
-	c.JSON(http.StatusOK, TestPaymentResponse{
-		RazorpayOrderID:   orderID,
-		RazorpayPaymentID: paymentID,
-		RazorpaySignature: signature,
+	// Return simulated payment details with standard response format
+	utils.Success(c, "Payment simulation completed successfully", gin.H{
+		"razorpay_order_id":   orderID,
+		"razorpay_payment_id": paymentID,
+		"razorpay_signature":  signature,
 	})
 }

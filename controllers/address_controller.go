@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"log"
-	"net/http"
 	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -50,20 +49,20 @@ func AddAddress(c *gin.Context) {
 	ensureAddressesTableExists()
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
 	var req AddAddressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
 	// Business validation
 	errs := utils.ValidateAddressFields(req.Line1, req.Line2, req.City, req.State, req.Country, req.PostalCode, &req.IsDefault)
 	if len(errs) > 0 {
-		c.JSON(422, gin.H{"error": "Validation failed", "fields": errs})
+		utils.BadRequest(c, "Validation failed", gin.H{"fields": errs})
 		return
 	}
 
@@ -74,7 +73,10 @@ func AddAddress(c *gin.Context) {
 
 	// Unset previous default if needed
 	if req.IsDefault {
-		config.DB.Model(&models.Address{}).Where("user_id = ?", user.(models.User).ID).Update("is_default", false)
+		if err := config.DB.Model(&models.Address{}).Where("user_id = ?", user.(models.User).ID).Update("is_default", false).Error; err != nil {
+			utils.InternalServerError(c, "Failed to update previous default address", err.Error())
+			return
+		}
 	}
 
 	address := models.Address{
@@ -89,11 +91,34 @@ func AddAddress(c *gin.Context) {
 	}
 
 	if err := config.DB.Create(&address).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add address"})
+		utils.InternalServerError(c, "Failed to add address", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Address added successfully", "address": address})
+	// Query the created address without timestamp fields
+	var createdAddress struct {
+		ID         uint   `json:"id"`
+		UserID     uint   `json:"user_id"`
+		Line1      string `json:"line1"`
+		Line2      string `json:"line2"`
+		City       string `json:"city"`
+		State      string `json:"state"`
+		Country    string `json:"country"`
+		PostalCode string `json:"postal_code"`
+		IsDefault  bool   `json:"is_default"`
+	}
+
+	if err := config.DB.Table("addresses").
+		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
+		Where("id = ?", address.ID).
+		First(&createdAddress).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch created address", err.Error())
+		return
+	}
+
+	utils.Success(c, "Address added successfully", gin.H{
+		"address": createdAddress,
+	})
 }
 
 // EditAddress edits an existing address for the user
@@ -110,20 +135,20 @@ func EditAddress(c *gin.Context) {
 	ensureAddressesTableExists()
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
 	addressID := c.Param("id")
 	var req EditAddressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
 	var address models.Address
 	if err := config.DB.Where("id = ? AND user_id = ?", addressID, user.(models.User).ID).First(&address).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Address not found"})
+		utils.NotFound(c, "Address not found")
 		return
 	}
 
@@ -154,7 +179,7 @@ func EditAddress(c *gin.Context) {
 	}
 	errs := utils.ValidateAddressFields(line1, line2, city, state, country, postalCode, nil)
 	if len(errs) > 0 {
-		c.JSON(422, gin.H{"error": "Validation failed", "fields": errs})
+		utils.BadRequest(c, "Validation failed", gin.H{"fields": errs})
 		return
 	}
 
@@ -190,11 +215,34 @@ func EditAddress(c *gin.Context) {
 	}
 
 	if err := config.DB.Save(&address).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update address"})
+		utils.InternalServerError(c, "Failed to update address", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Address updated successfully", "address": address})
+	// Query the updated address without timestamp fields
+	var updatedAddress struct {
+		ID         uint   `json:"id"`
+		UserID     uint   `json:"user_id"`
+		Line1      string `json:"line1"`
+		Line2      string `json:"line2"`
+		City       string `json:"city"`
+		State      string `json:"state"`
+		Country    string `json:"country"`
+		PostalCode string `json:"postal_code"`
+		IsDefault  bool   `json:"is_default"`
+	}
+
+	if err := config.DB.Table("addresses").
+		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
+		Where("id = ?", address.ID).
+		First(&updatedAddress).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch updated address", err.Error())
+		return
+	}
+
+	utils.Success(c, "Address updated successfully", gin.H{
+		"address": updatedAddress,
+	})
 }
 
 // DeleteAddress deletes an address for the user
@@ -202,18 +250,26 @@ func DeleteAddress(c *gin.Context) {
 	ensureAddressesTableExists()
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 	userModel := user.(models.User)
 	addressID := c.Param("id")
 
-	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).Delete(&models.Address{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete address"})
+	// First check if address exists and belongs to user
+	var address models.Address
+	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).First(&address).Error; err != nil {
+		utils.NotFound(c, "Address not found or already deleted")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Address deleted successfully"})
+	// Perform the delete operation
+	if err := config.DB.Delete(&address).Error; err != nil {
+		utils.InternalServerError(c, "Failed to delete address", err.Error())
+		return
+	}
+
+	utils.Success(c, "Address deleted successfully", nil)
 }
 
 // SetDefaultAddress sets one address as default for the user
@@ -221,22 +277,70 @@ func SetDefaultAddress(c *gin.Context) {
 	ensureAddressesTableExists()
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 	userModel := user.(models.User)
 	addressID := c.Param("id")
 
-	// Unset all previous defaults
-	config.DB.Model(&models.Address{}).Where("user_id = ?", userModel.ID).Update("is_default", false)
-
-	// Set this address as default
-	if err := config.DB.Model(&models.Address{}).Where("id = ? AND user_id = ?", addressID, userModel.ID).Update("is_default", true).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set default address"})
+	// First check if address exists and belongs to user
+	var address models.Address
+	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).First(&address).Error; err != nil {
+		utils.NotFound(c, "Address not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Default address set successfully"})
+	// Start a transaction
+	tx := config.DB.Begin()
+	if tx.Error != nil {
+		utils.InternalServerError(c, "Failed to start transaction", tx.Error.Error())
+		return
+	}
+
+	// Unset all previous defaults
+	if err := tx.Model(&models.Address{}).Where("user_id = ?", userModel.ID).Update("is_default", false).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to update previous default addresses", err.Error())
+		return
+	}
+
+	// Set this address as default
+	if err := tx.Model(&address).Update("is_default", true).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to set default address", err.Error())
+		return
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		utils.InternalServerError(c, "Failed to commit changes", err.Error())
+		return
+	}
+
+	// Query the updated address without timestamp fields
+	var updatedAddress struct {
+		ID         uint   `json:"id"`
+		UserID     uint   `json:"user_id"`
+		Line1      string `json:"line1"`
+		Line2      string `json:"line2"`
+		City       string `json:"city"`
+		State      string `json:"state"`
+		Country    string `json:"country"`
+		PostalCode string `json:"postal_code"`
+		IsDefault  bool   `json:"is_default"`
+	}
+
+	if err := config.DB.Table("addresses").
+		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
+		Where("id = ?", address.ID).
+		First(&updatedAddress).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch updated address", err.Error())
+		return
+	}
+
+	utils.Success(c, "Default address set successfully", gin.H{
+		"address": updatedAddress,
+	})
 }
 
 // GetAddresses returns all addresses for the authenticated user
@@ -244,16 +348,32 @@ func GetAddresses(c *gin.Context) {
 	ensureAddressesTableExists()
 	user, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 	userModel := user.(models.User)
 
-	var addresses []models.Address
-	if err := config.DB.Where("user_id = ?", userModel.ID).Find(&addresses).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch addresses"})
+	var addresses []struct {
+		ID         uint   `json:"id"`
+		UserID     uint   `json:"user_id"`
+		Line1      string `json:"line1"`
+		Line2      string `json:"line2"`
+		City       string `json:"city"`
+		State      string `json:"state"`
+		Country    string `json:"country"`
+		PostalCode string `json:"postal_code"`
+		IsDefault  bool   `json:"is_default"`
+	}
+
+	if err := config.DB.Table("addresses").
+		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
+		Where("user_id = ?", userModel.ID).
+		Find(&addresses).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch addresses", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"addresses": addresses})
+	utils.Success(c, "Addresses retrieved successfully", gin.H{
+		"addresses": addresses,
+	})
 }

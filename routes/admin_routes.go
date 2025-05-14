@@ -39,6 +39,7 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.PUT("/categories/:id", controllers.UpdateCategory)
 			admin.DELETE("/categories/:id", controllers.DeleteCategory)
 			admin.GET("/categories/:id/books", controllers.ListBooksByCategory)
+			admin.PATCH("/categories/:id/block", controllers.ToggleCategoryBlock)
 
 			// Book management
 			admin.GET("/books", controllers.GetBooks)
@@ -68,10 +69,8 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			// Return and refund management
 			admin.POST("/orders/:id/return/approve", controllers.ApproveOrderReturn)
 			admin.POST("/orders/:id/return/reject", controllers.RejectOrderReturn)
-
-			// Item cancellation management
-			admin.GET("/orders/item-cancellations", controllers.AdminListItemCancellationRequests)
-			admin.POST("/orders/:id/items/:item_id/review", controllers.AdminReviewItemCancellation)
+			admin.GET("/orders/return-items", controllers.AdminListReturnItems)
+			admin.POST("/orders/:id/items/:item_id/review", controllers.AdminReviewReturnItem)
 
 			// Coupon management
 			admin.POST("/coupons", controllers.CreateCoupon)

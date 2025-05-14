@@ -6,30 +6,56 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Response represents a standard API response
-type Response struct {
-	Success bool        `json:"success"`
+// StandardResponse represents the standard API response structure
+type StandardResponse struct {
+	Status  string      `json:"status"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
-	Error   interface{} `json:"error,omitempty"`
 }
 
-// Success sends a successful response
+// Success sends a standardized success response
 func Success(c *gin.Context, message string, data interface{}) {
-	c.JSON(http.StatusOK, Response{
-		Success: true,
+	c.JSON(http.StatusOK, StandardResponse{
+		Status:  "success",
 		Message: message,
 		Data:    data,
 	})
 }
 
-// Error sends an error response
-func Error(c *gin.Context, statusCode int, message string, err interface{}) {
-	c.JSON(statusCode, Response{
-		Success: false,
+// Created sends a standardized created response (201)
+func Created(c *gin.Context, message string, data interface{}) {
+	c.JSON(http.StatusCreated, StandardResponse{
+		Status:  "success",
 		Message: message,
-		Error:   err,
+		Data:    data,
 	})
+}
+
+// SuccessWithPagination sends a paginated success response
+func SuccessWithPagination(c *gin.Context, message string, data interface{}, total int64, page, perPage int) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": message,
+		"data":    data,
+		"pagination": gin.H{
+			"total":       total,
+			"page":        page,
+			"per_page":    perPage,
+			"total_pages": (total + int64(perPage) - 1) / int64(perPage),
+		},
+	})
+}
+
+// Error sends a standardized error response
+func Error(c *gin.Context, statusCode int, message string, err interface{}) {
+	response := StandardResponse{
+		Status:  "error",
+		Message: message,
+	}
+	if err != nil {
+		response.Data = gin.H{"error": err}
+	}
+	c.JSON(statusCode, response)
 }
 
 // BadRequest sends a 400 Bad Request response
@@ -60,4 +86,18 @@ func InternalServerError(c *gin.Context, message string, err interface{}) {
 // ValidationError sends a 422 Unprocessable Entity response
 func ValidationError(c *gin.Context, message string, err interface{}) {
 	Error(c, http.StatusUnprocessableEntity, message, err)
+}
+
+// Conflict sends a 409 Conflict response
+func Conflict(c *gin.Context, message string, err interface{}) {
+	Error(c, http.StatusConflict, message, err)
+}
+
+// Found sends a 302 Found response (for redirects)
+func Found(c *gin.Context, message string, data interface{}) {
+	c.JSON(http.StatusFound, StandardResponse{
+		Status:  "redirect",
+		Message: message,
+		Data:    data,
+	})
 }

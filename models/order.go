@@ -18,6 +18,7 @@ const (
 	OrderStatusReturnCompleted = "Return Completed"
 )
 
+// Order represents an order in the system
 type Order struct {
 	ID                          uint        `gorm:"primaryKey" json:"id"`
 	UserID                      uint        `json:"user_id"`
@@ -29,9 +30,12 @@ type Order struct {
 	CouponDiscount              float64     `json:"coupon_discount"`
 	CouponID                    uint        `json:"coupon_id"`
 	CouponCode                  string      `json:"coupon_code"`
-	Tax                         float64     `json:"tax"`
 	FinalTotal                  float64     `json:"final_total"`
 	PaymentMethod               string      `json:"payment_method"`
+	PaymentID                   string      `json:"payment_id"`
+	RazorpayOrderID             string      `json:"razorpay_order_id"`
+	RazorpayPaymentID           string      `json:"razorpay_payment_id"`
+	RazorpaySignature           string      `json:"razorpay_signature"`
 	Status                      string      `json:"status"`
 	CancellationReason          string      `json:"cancellation_reason,omitempty"`
 	ReturnReason                string      `json:"return_reason,omitempty"`
@@ -41,21 +45,29 @@ type Order struct {
 	RefundedAt                  *time.Time  `json:"refunded_at,omitempty"`
 	RefundedToWallet            bool        `json:"refunded_to_wallet,omitempty"`
 	HasItemCancellationRequests bool        `json:"has_item_cancellation_requests,omitempty"`
+	HasItemReturnRequests       bool        `json:"has_item_return_requests,omitempty"`
 	CreatedAt                   time.Time   `json:"created_at"`
 	UpdatedAt                   time.Time   `json:"updated_at"`
 	OrderItems                  []OrderItem `json:"items" gorm:"foreignKey:OrderID"`
 }
 
 type OrderItem struct {
-	ID                    uint    `gorm:"primaryKey" json:"id"`
-	OrderID               uint    `json:"order_id"`
-	BookID                uint    `json:"book_id"`
-	Book                  Book    `json:"book"`
-	Quantity              int     `json:"quantity"`
-	Price                 float64 `json:"price"`
-	Discount              float64 `json:"discount"`
-	Total                 float64 `json:"total"`
-	CancellationRequested bool    `json:"cancellation_requested,omitempty"`
-	CancellationReason    string  `json:"cancellation_reason,omitempty"`
-	CancellationStatus    string  `json:"cancellation_status,omitempty"` // Pending, Approved, Rejected
+	ID                    uint       `gorm:"primaryKey" json:"id"`
+	OrderID               uint       `json:"order_id"`
+	BookID                uint       `json:"book_id"`
+	Book                  Book       `json:"book"`
+	Quantity              int        `json:"quantity"`
+	Price                 float64    `json:"price"`
+	Discount              float64    `json:"discount"`
+	Total                 float64    `json:"total"`
+	CancellationRequested bool       `json:"cancellation_requested"`
+	CancellationReason    string     `json:"cancellation_reason"`
+	CancellationStatus    string     `json:"cancellation_status"`
+	ReturnRequested       bool       `json:"return_requested"`
+	ReturnReason          string     `json:"return_reason"`
+	ReturnStatus          string     `json:"return_status"`
+	RefundStatus          string     `json:"refund_status"`
+	RefundAmount          float64    `json:"refund_amount"`
+	RefundedAt            *time.Time `json:"refunded_at"`
+	StockRestored         bool       `json:"stock_restored" gorm:"default:false"`
 }

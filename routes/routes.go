@@ -1,11 +1,10 @@
 package routes
 
 import (
-	"net/http"
-
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -35,10 +34,12 @@ func SetupRouter() *gin.Engine {
 		auth.GET("/test/users", func(c *gin.Context) {
 			var users []models.User
 			if err := config.DB.Find(&users).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				utils.InternalServerError(c, "Internal Server Error", err.Error())
 				return
 			}
-			c.JSON(http.StatusOK, users)
+			utils.Success(c, "Users retrieved successfully", gin.H{
+				"users": users,
+			})
 		})
 	}
 

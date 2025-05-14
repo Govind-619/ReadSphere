@@ -3,13 +3,13 @@ package controllers
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
@@ -25,7 +25,7 @@ type AdminLoginRequest struct {
 func AdminLogin(c *gin.Context) {
 	var req AdminLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		utils.BadRequest(c, "Invalid input", err.Error())
 		return
 	}
 
@@ -34,19 +34,19 @@ func AdminLogin(c *gin.Context) {
 	var admin models.Admin
 	if err := config.DB.Where("email = ?", req.Email).First(&admin).Error; err != nil {
 		log.Printf("Admin not found: %v", err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		utils.Unauthorized(c, "Invalid credentials")
 		return
 	}
 
 	if !admin.IsActive {
 		log.Printf("Admin account is inactive: %s", admin.Email)
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin account is inactive"})
+		utils.Forbidden(c, "Admin account is inactive")
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(req.Password)); err != nil {
 		log.Printf("Invalid password for admin: %s", admin.Email)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		utils.Unauthorized(c, "Invalid credentials")
 		return
 	}
 
@@ -66,24 +66,21 @@ func AdminLogin(c *gin.Context) {
 
 	if jwtSecret == "" {
 		log.Printf("JWT secret not configured for token generation")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "JWT secret not configured"})
+		utils.InternalServerError(c, "JWT secret not configured", nil)
 		return
 	}
 
 	tokenString, err := token.SignedString([]byte(jwtSecret))
 	if err != nil {
 		log.Printf("Failed to generate token: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token: " + err.Error()})
+		utils.InternalServerError(c, "Failed to generate token", err.Error())
 		return
 	}
 
 	log.Printf("Token generated successfully for admin: %s", admin.Email)
-	log.Printf("Token: %s", tokenString)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Login successful",
-		"status":  "success",
-		"token":   tokenString,
+	utils.Success(c, "Login successful", gin.H{
+		"token": tokenString,
 		"admin": gin.H{
 			"id":        admin.ID,
 			"email":     admin.Email,
@@ -168,7 +165,7 @@ func GetUsers(c *gin.Context) {
 	var users []models.User
 	if err := query.Find(&users).Error; err != nil {
 		log.Printf("Failed to fetch users: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+		utils.InternalServerError(c, "Failed to fetch users", err.Error())
 		return
 	}
 
@@ -178,8 +175,25 @@ func GetUsers(c *gin.Context) {
 		log.Printf("User %d: ID=%d, Email=%s, CreatedAt=%v", i+1, user.ID, user.Email, user.CreatedAt)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"users": users,
+	// Create clean response without sensitive data
+	cleanUsers := make([]gin.H, len(users))
+	for i, user := range users {
+		cleanUsers[i] = gin.H{
+			"id":            user.ID,
+			"username":      user.Username,
+			"email":         user.Email,
+			"first_name":    user.FirstName,
+			"last_name":     user.LastName,
+			"is_blocked":    user.IsBlocked,
+			"is_verified":   user.IsVerified,
+			"created_at":    user.CreatedAt,
+			"last_login":    user.LastLoginAt,
+			"address_count": len(user.Addresses),
+		}
+	}
+
+	utils.Success(c, "Users retrieved successfully", gin.H{
+		"users": cleanUsers,
 		"pagination": gin.H{
 			"total":       total,
 			"page":        req.Page,
@@ -200,14 +214,14 @@ func BlockUser(c *gin.Context) {
 	admin, exists := c.Get("admin")
 	if !exists {
 		log.Printf("Admin not found in context")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin not found in context"})
+		utils.Unauthorized(c, "Admin not found in context")
 		return
 	}
 
 	adminModel, ok := admin.(models.Admin)
 	if !ok {
 		log.Printf("Invalid admin type in context")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid admin type"})
+		utils.InternalServerError(c, "Invalid admin type", nil)
 		return
 	}
 
@@ -217,7 +231,7 @@ func BlockUser(c *gin.Context) {
 	userID := c.Param("id")
 	if userID == "" {
 		log.Printf("User ID not provided")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
+		utils.BadRequest(c, "User ID is required", nil)
 		return
 	}
 
@@ -227,7 +241,7 @@ func BlockUser(c *gin.Context) {
 	var user models.User
 	if err := config.DB.First(&user, userID).Error; err != nil {
 		log.Printf("User not found: %v", err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		utils.NotFound(c, "User not found")
 		return
 	}
 
@@ -247,14 +261,18 @@ func BlockUser(c *gin.Context) {
 	// Update the user
 	if err := config.DB.Model(&user).Updates(updates).Error; err != nil {
 		log.Printf("Failed to update user block status: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user block status"})
+		utils.InternalServerError(c, "Failed to update user block status", err.Error())
 		return
 	}
 
 	log.Printf("User %s successfully: %s", action, user.Email)
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("User %s successfully", action),
-		"user":    user,
+	utils.Success(c, fmt.Sprintf("User %s successfully", action), gin.H{
+		"user": gin.H{
+			"id":         user.ID,
+			"email":      user.Email,
+			"username":   user.Username,
+			"is_blocked": user.IsBlocked,
+		},
 	})
 }
 
@@ -262,7 +280,7 @@ func BlockUser(c *gin.Context) {
 func AdminLogout(c *gin.Context) {
 	// In a JWT-based system, logout is handled client-side by removing the token
 	// We can add additional server-side cleanup if needed
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	utils.Success(c, "Logged out successfully", nil)
 }
 
 // CreateSampleAdmin creates a sample admin user
@@ -289,92 +307,160 @@ type DashboardOverview struct {
 	TotalOrders    int64            `json:"total_orders"`
 	TotalRevenue   float64          `json:"total_revenue"`
 	TotalCustomers int64            `json:"total_customers"`
-	RecentOrders   []models.Order   `json:"recent_orders"`
-	TopBooks       []models.Book    `json:"top_books"`
+	RecentOrders   []OrderOverview  `json:"recent_orders"`
+	TopBooks       []BookOverview   `json:"top_books"`
 	NavigationMenu []NavigationItem `json:"navigation_menu"`
+}
+
+// OrderOverview represents simplified order data for the dashboard
+type OrderOverview struct {
+	ID        uint      `json:"id"`
+	Username  string    `json:"username"`
+	Status    string    `json:"status"`
+	Total     float64   `json:"total"`
+	CreatedAt time.Time `json:"created_at"`
+	ItemCount int       `json:"item_count"`
+}
+
+// BookOverview represents simplified book data for the dashboard
+type BookOverview struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Views    int    `json:"views"`
 }
 
 // NavigationItem represents a menu item in the dashboard navigation
 type NavigationItem struct {
-	Title    string           `json:"title"`
+	Name     string           `json:"name"`
 	Path     string           `json:"path"`
 	Icon     string           `json:"icon"`
 	Children []NavigationItem `json:"children,omitempty"`
 }
 
-// GetDashboardOverview returns the admin dashboard overview
+// GetDashboardOverview returns overview data for admin dashboard
 func GetDashboardOverview(c *gin.Context) {
-	var overview DashboardOverview
+	log.Printf("GetDashboardOverview called")
 
-	// Get total sales count
-	config.DB.Model(&models.Order{}).Count(&overview.TotalOrders)
-
-	// Get total revenue
-	config.DB.Model(&models.Order{}).Select("COALESCE(SUM(total_amount), 0)").Scan(&overview.TotalRevenue)
-
-	// Get total customers
-	config.DB.Model(&models.User{}).Count(&overview.TotalCustomers)
-
-	// Get recent orders (last 5)
-	config.DB.Preload("User").Order("created_at desc").Limit(5).Find(&overview.RecentOrders)
-
-	// Get top books (by views)
-	config.DB.Preload("Category").Order("views desc").Limit(5).Find(&overview.TopBooks)
-
-	// Define navigation menu
-	overview.NavigationMenu = []NavigationItem{
-		{
-			Title: "Dashboard",
-			Path:  "/admin/dashboard",
-			Icon:  "dashboard",
-		},
-		{
-			Title: "Book Management",
-			Path:  "/admin/books",
-			Icon:  "book",
-			Children: []NavigationItem{
-				{Title: "All Books", Path: "/admin/books", Icon: "list"},
-				{Title: "Add Book", Path: "/admin/books/new", Icon: "add"},
-				{Title: "Categories", Path: "/admin/categories", Icon: "category"},
-			},
-		},
-		{
-			Title: "Order Management",
-			Path:  "/admin/orders",
-			Icon:  "shopping_cart",
-			Children: []NavigationItem{
-				{Title: "All Orders", Path: "/admin/orders", Icon: "list"},
-				{Title: "Pending Orders", Path: "/admin/orders/pending", Icon: "pending"},
-			},
-		},
-		{
-			Title: "Customer Management",
-			Path:  "/admin/users",
-			Icon:  "people",
-			Children: []NavigationItem{
-				{Title: "All Customers", Path: "/admin/users", Icon: "list"},
-				{Title: "Blocked Users", Path: "/admin/users/blocked", Icon: "block"},
-			},
-		},
-		{
-			Title: "Reports",
-			Path:  "/admin/reports",
-			Icon:  "analytics",
-			Children: []NavigationItem{
-				{Title: "Sales Report", Path: "/admin/reports/sales", Icon: "trending_up"},
-				{Title: "Customer Report", Path: "/admin/reports/customers", Icon: "people"},
-			},
-		},
-		{
-			Title: "Settings",
-			Path:  "/admin/settings",
-			Icon:  "settings",
-		},
+	// Check if admin is in context
+	admin, exists := c.Get("admin")
+	if !exists {
+		log.Printf("Admin not found in context")
+		utils.Unauthorized(c, "Admin not found in context")
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":  "Dashboard overview loaded successfully",
-		"status":   "success",
+	adminModel, ok := admin.(models.Admin)
+	if !ok {
+		log.Printf("Invalid admin type in context")
+		utils.InternalServerError(c, "Invalid admin type", nil)
+		return
+	}
+
+	log.Printf("Admin authenticated: %s", adminModel.Email)
+
+	// Get total sales (completed orders)
+	var totalSales int64
+	if err := config.DB.Model(&models.Order{}).Where("status = ?", "Delivered").Count(&totalSales).Error; err != nil {
+		log.Printf("Failed to get total sales: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Get total orders
+	var totalOrders int64
+	if err := config.DB.Model(&models.Order{}).Count(&totalOrders).Error; err != nil {
+		log.Printf("Failed to get total orders: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Get total revenue from completed orders
+	var totalRevenue float64
+	if err := config.DB.Model(&models.OrderItem{}).
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("orders.status = ?", "Delivered").
+		Select("COALESCE(SUM(order_items.quantity * order_items.price), 0)").
+		Scan(&totalRevenue).Error; err != nil {
+		log.Printf("Failed to get total revenue: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Get total customers
+	var totalCustomers int64
+	if err := config.DB.Model(&models.User{}).Count(&totalCustomers).Error; err != nil {
+		log.Printf("Failed to get total customers: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Get recent orders (last 3)
+	var recentOrders []models.Order
+	if err := config.DB.Preload("User").
+		Preload("OrderItems.Book").
+		Order("created_at desc").
+		Limit(3).
+		Find(&recentOrders).Error; err != nil {
+		log.Printf("Failed to get recent orders: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Get top books by views (top 3)
+	var topBooks []models.Book
+	if err := config.DB.Order("views desc").Limit(3).Find(&topBooks).Error; err != nil {
+		log.Printf("Failed to get top books: %v", err)
+		utils.InternalServerError(c, "Failed to get dashboard data", err.Error())
+		return
+	}
+
+	// Prepare recent orders overview
+	recentOrdersOverview := make([]OrderOverview, 0, len(recentOrders))
+	for _, order := range recentOrders {
+		recentOrdersOverview = append(recentOrdersOverview, OrderOverview{
+			ID:        order.ID,
+			Username:  order.User.Username,
+			Status:    order.Status,
+			Total:     order.FinalTotal,
+			CreatedAt: order.CreatedAt,
+			ItemCount: len(order.OrderItems),
+		})
+	}
+
+	// Prepare top books overview
+	topBooksOverview := make([]BookOverview, 0, len(topBooks))
+	for _, book := range topBooks {
+		topBooksOverview = append(topBooksOverview, BookOverview{
+			ID:       book.ID,
+			Name:     book.Name,
+			Category: book.Category.Name,
+			Views:    book.Views,
+		})
+	}
+
+	// Navigation menu items
+	navigationMenu := []NavigationItem{
+		{Name: "Dashboard", Path: "/admin/dashboard", Icon: "dashboard"},
+		{Name: "Orders", Path: "/admin/orders", Icon: "shopping_cart"},
+		{Name: "Products", Path: "/admin/books", Icon: "book"},
+		{Name: "Categories", Path: "/admin/categories", Icon: "category"},
+		{Name: "Customers", Path: "/admin/users", Icon: "people"},
+		{Name: "Reports", Path: "/admin/reports", Icon: "assessment"},
+		{Name: "Settings", Path: "/admin/settings", Icon: "settings"},
+	}
+
+	overview := DashboardOverview{
+		TotalSales:     totalSales,
+		TotalOrders:    totalOrders,
+		TotalRevenue:   totalRevenue,
+		TotalCustomers: totalCustomers,
+		RecentOrders:   recentOrdersOverview,
+		TopBooks:       topBooksOverview,
+		NavigationMenu: navigationMenu,
+	}
+
+	utils.Success(c, "Dashboard data retrieved successfully", gin.H{
 		"overview": overview,
 	})
 }

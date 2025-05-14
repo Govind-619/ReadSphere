@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"fmt"
-	"net/http"
+	"math"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -12,15 +12,24 @@ import (
 
 // AddToCart adds a product to the user's cart with validation
 func AddToCart(c *gin.Context) {
+	// Start transaction
+	tx := config.DB.Begin()
+	if tx.Error != nil {
+		utils.InternalServerError(c, "Failed to start transaction", nil)
+		return
+	}
+
 	// Assume user ID is set in context by auth middleware
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		tx.Rollback()
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		tx.Rollback()
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
@@ -30,7 +39,8 @@ func AddToCart(c *gin.Context) {
 		Quantity int  `json:"quantity"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		tx.Rollback()
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 	if req.Quantity < 1 {
@@ -41,127 +51,125 @@ func AddToCart(c *gin.Context) {
 		req.Quantity = maxQuantity
 	}
 
-	// Fetch book using GetBookByIDForCart to avoid Images scan error
-	book, err := utils.GetBookByIDForCart(req.BookID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+	// Lock the book row for update to prevent race conditions
+	var book models.Book
+	if err := tx.Set("gorm:pessimistic_lock", true).First(&book, req.BookID).Error; err != nil {
+		tx.Rollback()
+		utils.NotFound(c, "Book not found")
 		return
 	}
+
+	// Check if the item was previously canceled in any order
+	var canceledItem models.OrderItem
+	if err := tx.Where("book_id = ? AND cancellation_status = ?", req.BookID, "Cancelled").First(&canceledItem).Error; err == nil {
+		// Item was previously canceled, check if stock was already restored
+		if canceledItem.StockRestored {
+			// Stock was already restored, proceed normally
+		} else {
+			// Update the canceled item to mark stock as restored
+			canceledItem.StockRestored = true
+			if err := tx.Save(&canceledItem).Error; err != nil {
+				tx.Rollback()
+				utils.InternalServerError(c, "Failed to update canceled item status", nil)
+				return
+			}
+		}
+	}
+
+	// Validate book status
 	if !book.IsActive || book.Blocked {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available or blocked by admin"})
+		tx.Rollback()
+		utils.BadRequest(c, "Book not available or blocked by admin", nil)
 		return
 	}
+
+	// Validate category status
 	if book.CategoryID != 0 {
 		var category models.Category
-		db := config.DB
-		db.First(&category, book.CategoryID)
+		if err := tx.First(&category, book.CategoryID).Error; err != nil {
+			tx.Rollback()
+			utils.InternalServerError(c, "Failed to check category status", nil)
+			return
+		}
 		if category.Blocked {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Category blocked by admin"})
+			tx.Rollback()
+			utils.BadRequest(c, "Category blocked by admin", nil)
 			return
 		}
 	}
+
+	// Check current stock
 	if book.Stock < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
+		tx.Rollback()
+		utils.BadRequest(c, "Book out of stock", nil)
+		return
+	}
+
+	// Calculate total requested quantity including existing cart items
+	var existingCart models.Cart
+	var totalRequestedQuantity = req.Quantity
+
+	if err := tx.Where("user_id = ? AND book_id = ?", userID, req.BookID).First(&existingCart).Error; err == nil {
+		totalRequestedQuantity += existingCart.Quantity
+	}
+
+	// Validate total quantity against stock and max limit
+	if totalRequestedQuantity > maxQuantity {
+		tx.Rollback()
+		utils.BadRequest(c, fmt.Sprintf("Cannot add more than %d copies of the same book", maxQuantity), nil)
+		return
+	}
+
+	if totalRequestedQuantity > book.Stock {
+		tx.Rollback()
+		utils.BadRequest(c, fmt.Sprintf("Not enough stock. Available: %d", book.Stock), nil)
 		return
 	}
 
 	// Remove from wishlist if present
-	db := config.DB
-	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).Delete(&models.Wishlist{})
+	if err := tx.Where("user_id = ? AND book_id = ?", userID, req.BookID).Delete(&models.Wishlist{}).Error; err != nil {
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to update wishlist", nil)
+		return
+	}
 
-	// Check if already in cart
-	var cart models.Cart
-	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).First(&cart)
-	if cart.ID != 0 {
-		// Increment quantity
-		newQty := cart.Quantity + req.Quantity
-		if newQty > maxQuantity {
-			newQty = maxQuantity
-		}
-		if newQty > book.Stock {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
+	// Update or create cart item
+	var successMessage string
+	if existingCart.ID != 0 {
+		existingCart.Quantity = totalRequestedQuantity
+		if err := tx.Save(&existingCart).Error; err != nil {
+			tx.Rollback()
+			utils.InternalServerError(c, "Failed to update cart", nil)
 			return
 		}
-		cart.Quantity = newQty
-		db.Save(&cart)
-		// After update, fetch all cart items for the user
-		var cartItems []models.Cart
-		db.Where("user_id = ?", userID).Find(&cartItems)
-		canCheckout := true
-		for i := range cartItems {
-			book, err := utils.GetBookByIDForCart(cartItems[i].BookID)
-			if err == nil && book != nil {
-				cartItems[i].Book = *book
-			}
-			if !cartItems[i].Book.IsActive || cartItems[i].Book.Blocked {
-				canCheckout = false
-			}
-			if cartItems[i].Book.CategoryID != 0 {
-				var category models.Category
-				db := config.DB
-				db.First(&category, cartItems[i].Book.CategoryID)
-				if category.Blocked {
-					canCheckout = false
-				}
-			}
-			if cartItems[i].Book.Stock < cartItems[i].Quantity {
-				canCheckout = false
-			}
+		successMessage = "Cart item quantity updated"
+	} else {
+		newCart := models.Cart{
+			UserID:   userID,
+			BookID:   req.BookID,
+			Quantity: req.Quantity,
 		}
-		var minimalCartItems []gin.H
-		subtotal := 0.0
-		for _, item := range cartItems {
-			book := item.Book
-			offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
-discountPercent := offerBreakdown.AppliedOfferPercent
-			finalUnitPrice := utils.ApplyOfferToPrice(book.Price, discountPercent)
-			itemSubtotal := finalUnitPrice * float64(item.Quantity)
-			subtotal += itemSubtotal
-			minimalCartItems = append(minimalCartItems, gin.H{
-				"book_id":   book.ID,
-				"name":      book.Name,
-				"image_url": book.ImageURL,
-				"quantity":  item.Quantity,
-				"original_price": fmt.Sprintf("%.2f", book.Price),
-				"discount_percent": discountPercent,
-				"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
-				"total":     fmt.Sprintf("%.2f", itemSubtotal),
-				"stock_status": func() string {
-					if book.Stock < item.Quantity {
-						return "Out of Stock"
-					}
-					if book.Stock <= 3 {
-						return "Only a few left"
-					}
-					return "In Stock"
-				}(),
-			})
+		if err := tx.Create(&newCart).Error; err != nil {
+			tx.Rollback()
+			utils.InternalServerError(c, "Failed to add to cart", nil)
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"message":      "Cart updated (incremented)",
-			"cart":         minimalCartItems,
-			"subtotal":     fmt.Sprintf("%.2f", subtotal),
-			"total":        fmt.Sprintf("%.2f", subtotal),
-			"can_checkout": canCheckout,
-		})
+		successMessage = "Item added to cart successfully"
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		utils.InternalServerError(c, "Failed to complete cart update", nil)
 		return
 	}
-	if req.Quantity > book.Stock {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
-		return
-	}
-	newCart := models.Cart{
-		UserID:   userID,
-		BookID:   req.BookID,
-		Quantity: req.Quantity,
-	}
-	db.Create(&newCart)
-	// Fetch Book details for response using GetBookByIDForCart (avoids Images scan error)
-	book, _ = utils.GetBookByIDForCart(req.BookID)
-	newCart.Book = *book
-	// After adding, fetch all cart items for the user
+
+	// After successful transaction, get updated cart details
 	var cartItems []models.Cart
-	db.Where("user_id = ?", userID).Find(&cartItems)
+	if err := config.DB.Where("user_id = ?", userID).Find(&cartItems).Error; err != nil {
+		utils.InternalServerError(c, "Failed to fetch updated cart", nil)
+		return
+	}
+
 	canCheckout := true
 	for i := range cartItems {
 		book, err := utils.GetBookByIDForCart(cartItems[i].BookID)
@@ -185,17 +193,37 @@ discountPercent := offerBreakdown.AppliedOfferPercent
 	}
 	var minimalCartItems []gin.H
 	subtotal := 0.0
+	productDiscountTotal := 0.0
+	categoryDiscountTotal := 0.0
+
 	for _, item := range cartItems {
 		book := item.Book
-		itemSubtotal := book.Price * float64(item.Quantity)
-		subtotal += itemSubtotal
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+
+		// Calculate product and category discounts separately
+		productDiscountAmount := (book.Price * offerBreakdown.ProductOfferPercent / 100) * float64(item.Quantity)
+		categoryDiscountAmount := (book.Price * offerBreakdown.CategoryOfferPercent / 100) * float64(item.Quantity)
+
+		// Calculate final price after both discounts
+		finalUnitPrice := book.Price - (book.Price * offerBreakdown.ProductOfferPercent / 100) - (book.Price * offerBreakdown.CategoryOfferPercent / 100)
+		itemTotal := finalUnitPrice * float64(item.Quantity)
+
+		subtotal += book.Price * float64(item.Quantity) // Original subtotal before discounts
+		productDiscountTotal += productDiscountAmount
+		categoryDiscountTotal += categoryDiscountAmount
+
 		minimalCartItems = append(minimalCartItems, gin.H{
-			"book_id":   book.ID,
-			"name":      book.Name,
-			"image_url": book.ImageURL,
-			"quantity":  item.Quantity,
-			"price":     fmt.Sprintf("%.2f", book.Price),
-			"total":     fmt.Sprintf("%.2f", itemSubtotal),
+			"book_id":                book.ID,
+			"name":                   book.Name,
+			"image_url":              book.ImageURL,
+			"quantity":               item.Quantity,
+			"original_price":         fmt.Sprintf("%.2f", book.Price),
+			"product_offer_percent":  offerBreakdown.ProductOfferPercent,
+			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
+			"product_discount":       fmt.Sprintf("%.2f", productDiscountAmount),
+			"category_discount":      fmt.Sprintf("%.2f", categoryDiscountAmount),
+			"final_unit_price":       fmt.Sprintf("%.2f", finalUnitPrice),
+			"item_total":             fmt.Sprintf("%.2f", itemTotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -207,12 +235,41 @@ discountPercent := offerBreakdown.AppliedOfferPercent
 			}(),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Product added to cart",
-		"cart":         minimalCartItems,
-		"subtotal":     fmt.Sprintf("%.2f", subtotal),
-		"total":        fmt.Sprintf("%.2f", subtotal),
-		"can_checkout": canCheckout,
+
+	// Get active coupon if any
+	var couponDiscount float64 = 0
+	var couponCode string = ""
+	var activeUserCoupon models.UserActiveCoupon
+	if err := config.DB.Where("user_id = ?", userID).First(&activeUserCoupon).Error; err == nil {
+		// Found an active coupon
+		var coupon models.Coupon
+		if err := config.DB.Where("id = ?", activeUserCoupon.CouponID).First(&coupon).Error; err == nil {
+			couponCode = coupon.Code
+			if coupon.Type == "percent" {
+				couponDiscount = (subtotal * coupon.Value) / 100
+				if couponDiscount > coupon.MaxDiscount {
+					couponDiscount = coupon.MaxDiscount
+				}
+			} else {
+				couponDiscount = coupon.Value
+			}
+		}
+	}
+
+	// Calculate final total after all discounts
+	totalDiscount := productDiscountTotal + categoryDiscountTotal + couponDiscount
+	finalTotal := math.Round((subtotal-totalDiscount)*100) / 100
+
+	utils.Success(c, successMessage, gin.H{
+		"cart":              minimalCartItems,
+		"subtotal":          fmt.Sprintf("%.2f", math.Round(subtotal*100)/100),
+		"product_discount":  fmt.Sprintf("%.2f", math.Round(productDiscountTotal*100)/100),
+		"category_discount": fmt.Sprintf("%.2f", math.Round(categoryDiscountTotal*100)/100),
+		"coupon_discount":   fmt.Sprintf("%.2f", math.Round(couponDiscount*100)/100),
+		"coupon_code":       couponCode,
+		"total_discount":    fmt.Sprintf("%.2f", math.Round(totalDiscount*100)/100),
+		"final_total":       fmt.Sprintf("%.2f", finalTotal),
+		"can_checkout":      canCheckout,
 	})
 }
 
@@ -220,18 +277,26 @@ discountPercent := offerBreakdown.AppliedOfferPercent
 func GetCart(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
 	var cartItems []models.Cart
 	db := config.DB
-	db.Where("user_id = ?", userID).Find(&cartItems)
+	// Use table aliases and qualified column names
+	db.Table("carts").
+		Select("carts.*, books.name as book_name, categories.name as category_name, genres.name as genre_name").
+		Joins("LEFT JOIN books ON carts.book_id = books.id").
+		Joins("LEFT JOIN categories ON books.category_id = categories.id").
+		Joins("LEFT JOIN genres ON books.genre_id = genres.id").
+		Where("carts.user_id = ?", userID).
+		Find(&cartItems)
+
 	canCheckout := true
 	for i := range cartItems {
 		book, err := utils.GetBookByIDForCart(cartItems[i].BookID)
@@ -253,33 +318,40 @@ func GetCart(c *gin.Context) {
 			canCheckout = false
 		}
 	}
+
 	var minimalCartItems []gin.H
 	subtotal := 0.0
-	totalDiscount := 0.0
+	productDiscountTotal := 0.0
+	categoryDiscountTotal := 0.0
+
 	for _, item := range cartItems {
 		book := item.Book
 		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
-		// Sum both product and category offer percent for display and discount
-		appliedOfferPercent := offerBreakdown.ProductOfferPercent + offerBreakdown.CategoryOfferPercent
-		// Calculate discount using the sum
-		discountAmount := (book.Price * appliedOfferPercent / 100) * float64(item.Quantity)
-		finalUnitPrice := book.Price - (book.Price * appliedOfferPercent / 100)
+
+		// Calculate product and category discounts separately
+		productDiscountAmount := (book.Price * offerBreakdown.ProductOfferPercent / 100) * float64(item.Quantity)
+		categoryDiscountAmount := (book.Price * offerBreakdown.CategoryOfferPercent / 100) * float64(item.Quantity)
+
+		// Calculate final price after both discounts
+		finalUnitPrice := book.Price - (book.Price * offerBreakdown.ProductOfferPercent / 100) - (book.Price * offerBreakdown.CategoryOfferPercent / 100)
 		itemTotal := finalUnitPrice * float64(item.Quantity)
-		subtotal += itemTotal
-		totalDiscount += discountAmount
+
+		subtotal += book.Price * float64(item.Quantity) // Original subtotal before discounts
+		productDiscountTotal += productDiscountAmount
+		categoryDiscountTotal += categoryDiscountAmount
+
 		minimalCartItems = append(minimalCartItems, gin.H{
-			"book_id":   book.ID,
-			"name":      book.Name,
-			"image_url": book.ImageURL,
-			"quantity":  item.Quantity,
-			"original_price": fmt.Sprintf("%.2f", book.Price),
-			"product_offer_percent": offerBreakdown.ProductOfferPercent,
+			"book_id":                book.ID,
+			"name":                   book.Name,
+			"image_url":              book.ImageURL,
+			"quantity":               item.Quantity,
+			"original_price":         fmt.Sprintf("%.2f", book.Price),
+			"product_offer_percent":  offerBreakdown.ProductOfferPercent,
 			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
-			"applied_offer_percent": appliedOfferPercent,
-			"applied_offer_type": "product+category",
-			"discount_amount": fmt.Sprintf("%.2f", discountAmount),
-			"final_unit_price": fmt.Sprintf("%.2f", finalUnitPrice),
-			"item_total": fmt.Sprintf("%.2f", itemTotal),
+			"product_discount":       fmt.Sprintf("%.2f", productDiscountAmount),
+			"category_discount":      fmt.Sprintf("%.2f", categoryDiscountAmount),
+			"final_unit_price":       fmt.Sprintf("%.2f", finalUnitPrice),
+			"item_total":             fmt.Sprintf("%.2f", itemTotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -291,15 +363,45 @@ func GetCart(c *gin.Context) {
 			}(),
 		})
 	}
+
 	if minimalCartItems == nil {
 		minimalCartItems = []gin.H{}
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"cart":         minimalCartItems,
-		"subtotal":     fmt.Sprintf("%.2f", subtotal),
-		"total_discount": fmt.Sprintf("%.2f", totalDiscount),
-		"total":        fmt.Sprintf("%.2f", subtotal), // Add shipping, taxes if/when needed
-		"can_checkout": canCheckout,
+
+	// Get active coupon if any
+	var couponDiscount float64 = 0
+	var couponCode string = ""
+	var activeUserCoupon models.UserActiveCoupon
+	if err := db.Where("user_id = ?", userID).First(&activeUserCoupon).Error; err == nil {
+		// Found an active coupon
+		var coupon models.Coupon
+		if err := db.Where("id = ?", activeUserCoupon.CouponID).First(&coupon).Error; err == nil {
+			couponCode = coupon.Code
+			if coupon.Type == "percent" {
+				couponDiscount = (subtotal * coupon.Value) / 100
+				if couponDiscount > coupon.MaxDiscount {
+					couponDiscount = coupon.MaxDiscount
+				}
+			} else {
+				couponDiscount = coupon.Value
+			}
+		}
+	}
+
+	// Calculate final total after all discounts
+	totalDiscount := productDiscountTotal + categoryDiscountTotal + couponDiscount
+	finalTotal := math.Round((subtotal-totalDiscount)*100) / 100
+
+	utils.Success(c, "Cart retrieved successfully", gin.H{
+		"cart":              minimalCartItems,
+		"subtotal":          fmt.Sprintf("%.2f", math.Round(subtotal*100)/100),
+		"product_discount":  fmt.Sprintf("%.2f", math.Round(productDiscountTotal*100)/100),
+		"category_discount": fmt.Sprintf("%.2f", math.Round(categoryDiscountTotal*100)/100),
+		"coupon_discount":   fmt.Sprintf("%.2f", math.Round(couponDiscount*100)/100),
+		"coupon_code":       couponCode,
+		"total_discount":    fmt.Sprintf("%.2f", math.Round(totalDiscount*100)/100),
+		"final_total":       fmt.Sprintf("%.2f", finalTotal),
+		"can_checkout":      canCheckout,
 	})
 }
 
@@ -307,12 +409,12 @@ func GetCart(c *gin.Context) {
 func UpdateCart(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
@@ -321,7 +423,7 @@ func UpdateCart(c *gin.Context) {
 		Action string `json:"action" binding:"required"` // "increment" or "decrement"
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 	const maxQuantity = 5
@@ -329,21 +431,21 @@ func UpdateCart(c *gin.Context) {
 	db := config.DB
 	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).First(&cart)
 	if cart.ID == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Cart item not found"})
+		utils.NotFound(c, "Cart item not found")
 		return
 	}
 	book, err := utils.GetBookByIDForCart(req.BookID)
 	if err != nil || book == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Book not found"})
+		utils.NotFound(c, "Book not found")
 		return
 	}
 	if req.Action == "increment" {
 		if cart.Quantity >= maxQuantity {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Max quantity reached"})
+			utils.BadRequest(c, "Max quantity reached", nil)
 			return
 		}
 		if cart.Quantity+1 > book.Stock {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
+			utils.BadRequest(c, "Book out of stock", nil)
 			return
 		}
 		cart.Quantity++
@@ -356,7 +458,7 @@ func UpdateCart(c *gin.Context) {
 			db.Save(&cart)
 		}
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action"})
+		utils.BadRequest(c, "Invalid action", nil)
 		return
 	}
 	// After update, return full cart summary
@@ -385,17 +487,37 @@ func UpdateCart(c *gin.Context) {
 	}
 	var minimalCartItems []gin.H
 	subtotal := 0.0
+	productDiscountTotal := 0.0
+	categoryDiscountTotal := 0.0
+
 	for _, item := range cartItems {
 		book := item.Book
-		itemSubtotal := book.Price * float64(item.Quantity)
-		subtotal += itemSubtotal
+		offerBreakdown, _ := utils.GetOfferBreakdownForBook(book.ID, book.CategoryID)
+
+		// Calculate product and category discounts separately
+		productDiscountAmount := (book.Price * offerBreakdown.ProductOfferPercent / 100) * float64(item.Quantity)
+		categoryDiscountAmount := (book.Price * offerBreakdown.CategoryOfferPercent / 100) * float64(item.Quantity)
+
+		// Calculate final price after both discounts
+		finalUnitPrice := book.Price - (book.Price * offerBreakdown.ProductOfferPercent / 100) - (book.Price * offerBreakdown.CategoryOfferPercent / 100)
+		itemTotal := finalUnitPrice * float64(item.Quantity)
+
+		subtotal += book.Price * float64(item.Quantity) // Original subtotal before discounts
+		productDiscountTotal += productDiscountAmount
+		categoryDiscountTotal += categoryDiscountAmount
+
 		minimalCartItems = append(minimalCartItems, gin.H{
-			"book_id":   book.ID,
-			"name":      book.Name,
-			"image_url": book.ImageURL,
-			"quantity":  item.Quantity,
-			"price":     fmt.Sprintf("%.2f", book.Price),
-			"total":     fmt.Sprintf("%.2f", itemSubtotal),
+			"book_id":                book.ID,
+			"name":                   book.Name,
+			"image_url":              book.ImageURL,
+			"quantity":               item.Quantity,
+			"original_price":         fmt.Sprintf("%.2f", book.Price),
+			"product_offer_percent":  offerBreakdown.ProductOfferPercent,
+			"category_offer_percent": offerBreakdown.CategoryOfferPercent,
+			"product_discount":       fmt.Sprintf("%.2f", productDiscountAmount),
+			"category_discount":      fmt.Sprintf("%.2f", categoryDiscountAmount),
+			"final_unit_price":       fmt.Sprintf("%.2f", finalUnitPrice),
+			"item_total":             fmt.Sprintf("%.2f", itemTotal),
 			"stock_status": func() string {
 				if book.Stock < item.Quantity {
 					return "Out of Stock"
@@ -407,12 +529,41 @@ func UpdateCart(c *gin.Context) {
 			}(),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Cart updated",
-		"cart":         minimalCartItems,
-		"subtotal":     fmt.Sprintf("%.2f", subtotal),
-		"total":        fmt.Sprintf("%.2f", subtotal),
-		"can_checkout": canCheckout,
+
+	// Get active coupon if any
+	var couponDiscount float64 = 0
+	var couponCode string = ""
+	var activeUserCoupon models.UserActiveCoupon
+	if err := db.Where("user_id = ?", userID).First(&activeUserCoupon).Error; err == nil {
+		// Found an active coupon
+		var coupon models.Coupon
+		if err := db.Where("id = ?", activeUserCoupon.CouponID).First(&coupon).Error; err == nil {
+			couponCode = coupon.Code
+			if coupon.Type == "percent" {
+				couponDiscount = (subtotal * coupon.Value) / 100
+				if couponDiscount > coupon.MaxDiscount {
+					couponDiscount = coupon.MaxDiscount
+				}
+			} else {
+				couponDiscount = coupon.Value
+			}
+		}
+	}
+
+	// Calculate final total after all discounts
+	totalDiscount := productDiscountTotal + categoryDiscountTotal + couponDiscount
+	finalTotal := math.Round((subtotal-totalDiscount)*100) / 100
+
+	utils.Success(c, "Cart updated", gin.H{
+		"cart":              minimalCartItems,
+		"subtotal":          fmt.Sprintf("%.2f", math.Round(subtotal*100)/100),
+		"product_discount":  fmt.Sprintf("%.2f", math.Round(productDiscountTotal*100)/100),
+		"category_discount": fmt.Sprintf("%.2f", math.Round(categoryDiscountTotal*100)/100),
+		"coupon_discount":   fmt.Sprintf("%.2f", math.Round(couponDiscount*100)/100),
+		"coupon_code":       couponCode,
+		"total_discount":    fmt.Sprintf("%.2f", math.Round(totalDiscount*100)/100),
+		"final_total":       fmt.Sprintf("%.2f", finalTotal),
+		"can_checkout":      canCheckout,
 	})
 }
 
@@ -420,30 +571,30 @@ func UpdateCart(c *gin.Context) {
 func ClearCart(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
 	db := config.DB
 	db.Where("user_id = ?", userID).Delete(&models.Cart{})
-	c.JSON(http.StatusOK, gin.H{"message": "Cart cleared successfully"})
+	utils.Success(c, "Cart cleared successfully", nil)
 }
 
 // CheckoutCart attempts to checkout the cart, blocks if any item is out of stock
 func CheckoutCart(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
@@ -451,12 +602,12 @@ func CheckoutCart(c *gin.Context) {
 	db := config.DB
 	db.Preload("Book").Where("user_id = ?", userID).Find(&cartItems)
 	if len(cartItems) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cart is empty"})
+		utils.BadRequest(c, "Cart is empty", nil)
 		return
 	}
 	for _, item := range cartItems {
 		if !item.Book.IsActive || item.Book.Blocked {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Book not available or blocked by admin"})
+			utils.BadRequest(c, "Book not available or blocked by admin", nil)
 			return
 		}
 		if item.Book.CategoryID != 0 {
@@ -464,31 +615,31 @@ func CheckoutCart(c *gin.Context) {
 			db := config.DB
 			db.First(&category, item.Book.CategoryID)
 			if category.Blocked {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Category blocked by admin"})
+				utils.BadRequest(c, "Category blocked by admin", nil)
 				return
 			}
 		}
 		if item.Book.Stock < item.Quantity {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Book out of stock"})
+			utils.BadRequest(c, "Book out of stock", nil)
 			return
 		}
 	}
 	// (Order creation logic would go here)
 	// For now, just clear cart and return success
 	db.Where("user_id = ?", userID).Delete(&models.Cart{})
-	c.JSON(http.StatusOK, gin.H{"message": "Checkout successful. Order placed."})
+	utils.Success(c, "Checkout successful. Order placed.", nil)
 }
 
 // RemoveFromCart removes a product from the cart
 func RemoveFromCart(c *gin.Context) {
 	userVal, exists := c.Get("user")
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		utils.Unauthorized(c, "Unauthorized")
 		return
 	}
 	user, ok := userVal.(models.User)
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user in context"})
+		utils.BadRequest(c, "Invalid user in context", nil)
 		return
 	}
 	userID := user.ID
@@ -496,10 +647,10 @@ func RemoveFromCart(c *gin.Context) {
 		BookID uint `json:"book_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
 	db := config.DB
 	db.Where("user_id = ? AND book_id = ?", userID, req.BookID).Delete(&models.Cart{})
-	c.JSON(http.StatusOK, gin.H{"message": "Product removed from cart successfully"})
+	utils.Success(c, "Product removed from cart successfully", nil)
 }

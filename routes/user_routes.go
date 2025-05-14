@@ -69,10 +69,12 @@ func initUserRoutes(router *gin.RouterGroup) {
 	router.GET("/categories", controllers.ListCategories)
 	router.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
-	// Protected routes (require authentication)
-	// Referral: Accept referral via token (public, user must sign up and then visit link)
+	// Referral routes
+	router.GET("/referral/:token", controllers.GetReferralToken)
 	router.GET("/referral/invite/:token", controllers.AcceptReferralToken)
 
+	// Protected routes (require authentication)
+	// Referral: Accept referral via token (public, user must sign up and then visit link)
 	protected := router.Group("/user")
 	protected.Use(middleware.AuthMiddleware())
 	{
@@ -104,6 +106,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.POST("/orders/:id/cancel", controllers.CancelOrder)
 		protected.POST("/orders/:id/items/:item_id/cancel", controllers.CancelOrderItem)
 		protected.POST("/orders/:id/return", controllers.ReturnOrder)
+		protected.POST("/orders/:id/items/:item_id/return", controllers.ReturnOrderItem)
 		protected.GET("/orders/:id/invoice", controllers.DownloadInvoice)
 
 		// Logout

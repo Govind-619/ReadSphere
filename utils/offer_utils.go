@@ -2,13 +2,13 @@ package utils
 
 import (
 	"time"
-	"github.com/Govind-619/ReadSphere/models"
+
 	"github.com/Govind-619/ReadSphere/config"
+	"github.com/Govind-619/ReadSphere/models"
 )
 
 // OfferBreakdown holds details of both product and category offers
 // and the final offer applied
-//
 type OfferBreakdown struct {
 	ProductOfferPercent  float64 `json:"product_offer_percent"`
 	CategoryOfferPercent float64 `json:"category_offer_percent"`
@@ -24,7 +24,6 @@ func GetOfferBreakdownForBook(bookID uint, categoryID uint) (OfferBreakdown, err
 	var catOffer models.CategoryOffer
 	prodPercent := 0.0
 	catPercent := 0.0
-	appliedType := "none"
 
 	// Check product-specific offer
 	err1 := db.Where("product_id = ? AND active = ? AND start_date <= ? AND end_date >= ?", bookID, true, now, now).First(&prodOffer).Error
@@ -36,23 +35,13 @@ func GetOfferBreakdownForBook(bookID uint, categoryID uint) (OfferBreakdown, err
 	if err2 == nil {
 		catPercent = catOffer.DiscountPercent
 	}
-	appliedPercent := 0.0
-	if prodPercent > catPercent {
-		appliedPercent = prodPercent
-		if prodPercent > 0 {
-			appliedType = "product"
-		}
-	} else {
-		appliedPercent = catPercent
-		if catPercent > 0 {
-			appliedType = "category"
-		}
-	}
+
+	// Return both product and category discounts
 	return OfferBreakdown{
 		ProductOfferPercent:  prodPercent,
 		CategoryOfferPercent: catPercent,
-		AppliedOfferPercent:  appliedPercent,
-		AppliedOfferType:     appliedType,
+		AppliedOfferPercent:  prodPercent + catPercent, // Sum both for total discount
+		AppliedOfferType:     "product+category",
 	}, nil
 }
 
@@ -61,7 +50,6 @@ func GetBestOfferForBook(bookID uint, categoryID uint) (float64, error) {
 	ob, err := GetOfferBreakdownForBook(bookID, categoryID)
 	return ob.AppliedOfferPercent, err
 }
-
 
 // ApplyOfferToPrice returns the discounted price given original and discount percent
 func ApplyOfferToPrice(original float64, discountPercent float64) float64 {
@@ -82,4 +70,3 @@ func CalculateOfferDetails(original float64, bookID uint, categoryID uint) (fina
 	discountAmount = original - finalPrice
 	return finalPrice, breakdown, discountAmount, nil
 }
-
