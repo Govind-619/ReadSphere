@@ -114,6 +114,19 @@ func PlaceOrder(c *gin.Context) {
 		return
 	}
 
+	// Check COD limit
+	if paymentMethod == "cod" {
+		cartDetails, err := utils.GetCartDetails(userID)
+		if err != nil {
+			utils.InternalServerError(c, "Failed to get cart details", err.Error())
+			return
+		}
+		if cartDetails.FinalTotal > 1000 {
+			utils.BadRequest(c, "Cash on Delivery is not available for orders above ₹1000. Please choose online payment or wallet payment.", nil)
+			return
+		}
+	}
+
 	db := config.DB
 	var address models.Address
 	if req.Address != nil {

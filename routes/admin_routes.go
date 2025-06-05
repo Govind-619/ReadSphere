@@ -101,6 +101,15 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			admin.GET("/sales/report", controllers.GenerateSalesReport)
 			admin.GET("/sales/report/pdf", controllers.DownloadSalesReportPDF)
 			admin.GET("/sales/report/excel", controllers.DownloadSalesReportExcel)
+
+			// Dashboard routes
+			dashboard := admin.Group("/dashboard")
+			{
+				dashboard.GET("/stats", controllers.GetDashboardStats)
+				dashboard.GET("/sales-chart", controllers.GetSalesChart)
+				dashboard.GET("/top-products", controllers.GetTopSellingProducts)
+				dashboard.GET("/top-categories", controllers.GetTopSellingCategories)
+			}
 		}
 	}
 }

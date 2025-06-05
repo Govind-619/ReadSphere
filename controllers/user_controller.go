@@ -353,7 +353,7 @@ func VerifyOTP(c *gin.Context) {
 		}
 		// Resend new OTP
 		newOTP := generateOTP()
-		log.Printf("[OTP RESEND] Registration OTP sent to %s: %s", email, newOTP)
+		log.Printf("Registration OTP sent to %s: %s", email, newOTP)
 		session.Set("registration_otp", newOTP)
 		session.Set("registration_otp_expires", time.Now().Add(1*time.Minute).Unix())
 		if err := session.Save(); err != nil {
@@ -407,25 +407,10 @@ func VerifyOTP(c *gin.Context) {
 		}
 	}
 
-	// Generate JWT token for login
-	loginToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"email":   user.Email,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(),
-	})
-	tokenString, err := loginToken.SignedString([]byte(os.Getenv("JWT_SECRET")))
-	if err != nil {
-		log.Printf("Token generation error: %v", err)
-		utils.InternalServerError(c, "Failed to generate token", err.Error())
-		return
-	}
-
 	utils.Success(c, "Email verified and registration completed successfully", gin.H{
-		"token": tokenString,
-		"user": gin.H{
-			"id":       user.ID,
-			"username": user.Username,
-			"email":    user.Email,
+		"redirect": gin.H{
+			"url":     "/login",
+			"message": "Please login with your credentials",
 		},
 	})
 }
