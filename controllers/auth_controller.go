@@ -33,14 +33,24 @@ func GoogleLogin(c *gin.Context) {
 }
 
 func GoogleCallback(c *gin.Context) {
+	// Check if this is a token-based callback (from frontend)
+	if token := c.Query("token"); token != "" {
+		// This is a frontend callback, just return success
+		utils.Success(c, "Google login successful", nil)
+		return
+	}
+
+	// This is the initial Google OAuth callback
 	code := c.Query("code")
 	if code == "" {
+		utils.LogError("Google callback failed - No code provided")
 		utils.BadRequest(c, "No code provided", nil)
 		return
 	}
 
 	token, err := config.GoogleOAuthConfig.Exchange(c, code)
 	if err != nil {
+		utils.LogError("Google callback failed - Token exchange error: %v", err)
 		utils.InternalServerError(c, "Failed to exchange token", err.Error())
 		return
 	}
@@ -48,6 +58,7 @@ func GoogleCallback(c *gin.Context) {
 	// Get user info from Google
 	resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
 	if err != nil {
+		utils.LogError("Google callback failed - Failed to get user info: %v", err)
 		utils.InternalServerError(c, "Failed to get user info", err.Error())
 		return
 	}
@@ -55,12 +66,14 @@ func GoogleCallback(c *gin.Context) {
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		utils.LogError("Google callback failed - Failed to read response: %v", err)
 		utils.InternalServerError(c, "Failed to read response", err.Error())
 		return
 	}
 
 	var googleUser GoogleUserInfo
 	if err := json.Unmarshal(data, &googleUser); err != nil {
+		utils.LogError("Google callback failed - Failed to parse user info: %v", err)
 		utils.InternalServerError(c, "Failed to parse user info", err.Error())
 		return
 	}
@@ -79,19 +92,21 @@ func GoogleCallback(c *gin.Context) {
 		}
 
 		// Generate a secure but shorter password for Google users
-		// Using first 8 chars of GoogleID + timestamp in seconds
 		password := googleUser.ID[:8] + fmt.Sprintf("%d", time.Now().Unix())
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
+			utils.LogError("Google callback failed - Password hashing error: %v", err)
 			utils.InternalServerError(c, "Failed to hash password", err.Error())
 			return
 		}
 		user.Password = string(hashedPassword)
 
 		if err := config.DB.Create(&user).Error; err != nil {
+			utils.LogError("Google callback failed - Failed to create user: %v", err)
 			utils.InternalServerError(c, "Failed to create user", err.Error())
 			return
 		}
+		utils.LogInfo("New user created via Google login: %s", user.Email)
 	}
 
 	// Generate JWT token
@@ -103,16 +118,26 @@ func GoogleCallback(c *gin.Context) {
 
 	tokenString, err := jwtToken.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	if err != nil {
+		utils.LogError("Google callback failed - Token generation error: %v", err)
 		utils.InternalServerError(c, "Failed to generate token", err.Error())
 		return
 	}
 
-	// Instead of returning JSON, redirect to frontend with token
-	redirectURL := fmt.Sprintf("%s?token=%s&user=%s",
+	// Create user data for frontend
+	userData := gin.H{
+		"id":        user.ID,
+		"email":     user.Email,
+		"firstName": user.FirstName,
+		"lastName":  user.LastName,
+	}
+	userDataJSON, _ := json.Marshal(userData)
+
+	// Redirect to frontend with token and user data
+	redirectURL := fmt.Sprintf("%s/auth/google/callback?token=%s&user=%s",
 		os.Getenv("FRONTEND_URL"),
 		url.QueryEscape(tokenString),
-		url.QueryEscape(fmt.Sprintf(`{"id":%d,"email":"%s","firstName":"%s","lastName":"%s"}`,
-			user.ID, user.Email, user.FirstName, user.LastName)))
+		url.QueryEscape(string(userDataJSON)))
 
+	utils.LogInfo("Google login successful for user: %s", user.Email)
 	c.Redirect(http.StatusTemporaryRedirect, redirectURL)
 }

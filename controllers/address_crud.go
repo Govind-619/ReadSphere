@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"log"
 	"strings"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -12,12 +11,13 @@ import (
 
 // ensureAddressesTableExists checks and creates the addresses table if it does not exist
 func ensureAddressesTableExists() {
+	utils.LogInfo("Checking if addresses table exists")
 	db := config.DB
 	type result struct{ TableName string }
 	var res result
 	db.Raw("SELECT to_regclass('public.addresses') AS table_name;").Scan(&res)
 	if res.TableName == "" {
-		log.Println("Table 'addresses' does not exist. Creating...")
+		utils.LogInfo("Table 'addresses' does not exist. Creating...")
 		db.Exec(`CREATE TABLE IF NOT EXISTS addresses (
 			id SERIAL PRIMARY KEY,
 			user_id INTEGER NOT NULL,
@@ -31,6 +31,7 @@ func ensureAddressesTableExists() {
 			created_at TIMESTAMP,
 			updated_at TIMESTAMP
 		);`)
+		utils.LogInfo("Addresses table created successfully")
 	}
 }
 
@@ -46,15 +47,22 @@ type AddAddressRequest struct {
 }
 
 func AddAddress(c *gin.Context) {
+	utils.LogInfo("AddAddress called")
 	ensureAddressesTableExists()
+
 	user, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
+	userModel := user.(models.User)
+	utils.LogInfo("Processing address addition for user ID: %d", userModel.ID)
+
 	var req AddAddressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.LogError("Invalid request format for user ID: %d: %v", userModel.ID, err)
 		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
@@ -62,6 +70,7 @@ func AddAddress(c *gin.Context) {
 	// Business validation
 	errs := utils.ValidateAddressFields(req.Line1, req.Line2, req.City, req.State, req.Country, req.PostalCode, &req.IsDefault)
 	if len(errs) > 0 {
+		utils.LogError("Address validation failed for user ID: %d: %v", userModel.ID, errs)
 		utils.BadRequest(c, "Validation failed", gin.H{"fields": errs})
 		return
 	}
@@ -73,14 +82,15 @@ func AddAddress(c *gin.Context) {
 
 	// Unset previous default if needed
 	if req.IsDefault {
-		if err := config.DB.Model(&models.Address{}).Where("user_id = ?", user.(models.User).ID).Update("is_default", false).Error; err != nil {
+		if err := config.DB.Model(&models.Address{}).Where("user_id = ?", userModel.ID).Update("is_default", false).Error; err != nil {
+			utils.LogError("Failed to update previous default address for user ID: %d: %v", userModel.ID, err)
 			utils.InternalServerError(c, "Failed to update previous default address", err.Error())
 			return
 		}
 	}
 
 	address := models.Address{
-		UserID:     user.(models.User).ID,
+		UserID:     userModel.ID,
 		Line1:      req.Line1,
 		Line2:      req.Line2,
 		City:       req.City,
@@ -91,6 +101,7 @@ func AddAddress(c *gin.Context) {
 	}
 
 	if err := config.DB.Create(&address).Error; err != nil {
+		utils.LogError("Failed to add address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to add address", err.Error())
 		return
 	}
@@ -112,10 +123,12 @@ func AddAddress(c *gin.Context) {
 		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
 		Where("id = ?", address.ID).
 		First(&createdAddress).Error; err != nil {
+		utils.LogError("Failed to fetch created address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to fetch created address", err.Error())
 		return
 	}
 
+	utils.LogInfo("Address added successfully for user ID: %d, address ID: %d", userModel.ID, address.ID)
 	utils.Success(c, "Address added successfully", gin.H{
 		"address": createdAddress,
 	})
@@ -132,22 +145,30 @@ type EditAddressRequest struct {
 }
 
 func EditAddress(c *gin.Context) {
+	utils.LogInfo("EditAddress called")
 	ensureAddressesTableExists()
+
 	user, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 
+	userModel := user.(models.User)
 	addressID := c.Param("id")
+	utils.LogInfo("Processing address edit for user ID: %d, address ID: %s", userModel.ID, addressID)
+
 	var req EditAddressRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.LogError("Invalid request format for user ID: %d: %v", userModel.ID, err)
 		utils.BadRequest(c, "Invalid request format", err.Error())
 		return
 	}
 
 	var address models.Address
-	if err := config.DB.Where("id = ? AND user_id = ?", addressID, user.(models.User).ID).First(&address).Error; err != nil {
+	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).First(&address).Error; err != nil {
+		utils.LogError("Address not found for user ID: %d, address ID: %s", userModel.ID, addressID)
 		utils.NotFound(c, "Address not found")
 		return
 	}
@@ -179,6 +200,7 @@ func EditAddress(c *gin.Context) {
 	}
 	errs := utils.ValidateAddressFields(line1, line2, city, state, country, postalCode, nil)
 	if len(errs) > 0 {
+		utils.LogError("Address validation failed for user ID: %d: %v", userModel.ID, errs)
 		utils.BadRequest(c, "Validation failed", gin.H{"fields": errs})
 		return
 	}
@@ -215,6 +237,7 @@ func EditAddress(c *gin.Context) {
 	}
 
 	if err := config.DB.Save(&address).Error; err != nil {
+		utils.LogError("Failed to update address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to update address", err.Error())
 		return
 	}
@@ -236,10 +259,12 @@ func EditAddress(c *gin.Context) {
 		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
 		Where("id = ?", address.ID).
 		First(&updatedAddress).Error; err != nil {
+		utils.LogError("Failed to fetch updated address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to fetch updated address", err.Error())
 		return
 	}
 
+	utils.LogInfo("Address updated successfully for user ID: %d, address ID: %d", userModel.ID, address.ID)
 	utils.Success(c, "Address updated successfully", gin.H{
 		"address": updatedAddress,
 	})
@@ -247,133 +272,48 @@ func EditAddress(c *gin.Context) {
 
 // DeleteAddress deletes an address for the user
 func DeleteAddress(c *gin.Context) {
+	utils.LogInfo("DeleteAddress called")
 	ensureAddressesTableExists()
+
 	user, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found in context")
 		return
 	}
 	userModel := user.(models.User)
 	addressID := c.Param("id")
+	utils.LogInfo("Processing address deletion for user ID: %d, address ID: %s", userModel.ID, addressID)
 
 	// First check if address exists and belongs to user
 	var address models.Address
 	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).First(&address).Error; err != nil {
+		utils.LogError("Address not found or already deleted for user ID: %d, address ID: %s", userModel.ID, addressID)
 		utils.NotFound(c, "Address not found or already deleted")
+		return
+	}
+
+	// Check if address is referenced in any orders
+	var orderCount int64
+	if err := config.DB.Model(&models.Order{}).Where("address_id = ?", addressID).Count(&orderCount).Error; err != nil {
+		utils.LogError("Failed to check order references for address ID: %s: %v", addressID, err)
+		utils.InternalServerError(c, "Failed to check address usage", err.Error())
+		return
+	}
+
+	if orderCount > 0 {
+		utils.LogError("Cannot delete address ID: %s as it is referenced by %d orders", addressID, orderCount)
+		utils.BadRequest(c, "Cannot delete address", "This address is associated with existing orders and cannot be deleted")
 		return
 	}
 
 	// Perform the delete operation
 	if err := config.DB.Delete(&address).Error; err != nil {
+		utils.LogError("Failed to delete address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to delete address", err.Error())
 		return
 	}
 
+	utils.LogInfo("Address deleted successfully for user ID: %d, address ID: %d", userModel.ID, address.ID)
 	utils.Success(c, "Address deleted successfully", nil)
-}
-
-// SetDefaultAddress sets one address as default for the user
-func SetDefaultAddress(c *gin.Context) {
-	ensureAddressesTableExists()
-	user, exists := c.Get("user")
-	if !exists {
-		utils.Unauthorized(c, "User not found in context")
-		return
-	}
-	userModel := user.(models.User)
-	addressID := c.Param("id")
-
-	// First check if address exists and belongs to user
-	var address models.Address
-	if err := config.DB.Where("id = ? AND user_id = ?", addressID, userModel.ID).First(&address).Error; err != nil {
-		utils.NotFound(c, "Address not found")
-		return
-	}
-
-	// Start a transaction
-	tx := config.DB.Begin()
-	if tx.Error != nil {
-		utils.InternalServerError(c, "Failed to start transaction", tx.Error.Error())
-		return
-	}
-
-	// Unset all previous defaults
-	if err := tx.Model(&models.Address{}).Where("user_id = ?", userModel.ID).Update("is_default", false).Error; err != nil {
-		tx.Rollback()
-		utils.InternalServerError(c, "Failed to update previous default addresses", err.Error())
-		return
-	}
-
-	// Set this address as default
-	if err := tx.Model(&address).Update("is_default", true).Error; err != nil {
-		tx.Rollback()
-		utils.InternalServerError(c, "Failed to set default address", err.Error())
-		return
-	}
-
-	// Commit transaction
-	if err := tx.Commit().Error; err != nil {
-		utils.InternalServerError(c, "Failed to commit changes", err.Error())
-		return
-	}
-
-	// Query the updated address without timestamp fields
-	var updatedAddress struct {
-		ID         uint   `json:"id"`
-		UserID     uint   `json:"user_id"`
-		Line1      string `json:"line1"`
-		Line2      string `json:"line2"`
-		City       string `json:"city"`
-		State      string `json:"state"`
-		Country    string `json:"country"`
-		PostalCode string `json:"postal_code"`
-		IsDefault  bool   `json:"is_default"`
-	}
-
-	if err := config.DB.Table("addresses").
-		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
-		Where("id = ?", address.ID).
-		First(&updatedAddress).Error; err != nil {
-		utils.InternalServerError(c, "Failed to fetch updated address", err.Error())
-		return
-	}
-
-	utils.Success(c, "Default address set successfully", gin.H{
-		"address": updatedAddress,
-	})
-}
-
-// GetAddresses returns all addresses for the authenticated user
-func GetAddresses(c *gin.Context) {
-	ensureAddressesTableExists()
-	user, exists := c.Get("user")
-	if !exists {
-		utils.Unauthorized(c, "User not found in context")
-		return
-	}
-	userModel := user.(models.User)
-
-	var addresses []struct {
-		ID         uint   `json:"id"`
-		UserID     uint   `json:"user_id"`
-		Line1      string `json:"line1"`
-		Line2      string `json:"line2"`
-		City       string `json:"city"`
-		State      string `json:"state"`
-		Country    string `json:"country"`
-		PostalCode string `json:"postal_code"`
-		IsDefault  bool   `json:"is_default"`
-	}
-
-	if err := config.DB.Table("addresses").
-		Select("id, user_id, line1, line2, city, state, country, postal_code, is_default").
-		Where("user_id = ?", userModel.ID).
-		Find(&addresses).Error; err != nil {
-		utils.InternalServerError(c, "Failed to fetch addresses", err.Error())
-		return
-	}
-
-	utils.Success(c, "Addresses retrieved successfully", gin.H{
-		"addresses": addresses,
-	})
 }

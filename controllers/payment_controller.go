@@ -17,33 +17,56 @@ import (
 
 // POST /user/checkout/payment/initiate
 func InitiateRazorpayPayment(c *gin.Context) {
+	utils.LogInfo("InitiateRazorpayPayment called")
 	userVal, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found")
 		return
 	}
 	user := userVal.(models.User)
 	userID := user.ID
+	utils.LogInfo("Processing payment initiation for user ID: %d", userID)
 
 	var req struct {
 		OrderID uint64 `json:"order_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.LogError("Invalid request for user ID: %d: %v", userID, err)
 		utils.BadRequest(c, "Invalid request. order_id is required", err.Error())
 		return
 	}
+
 	db := config.DB
 	var order models.Order
-	db.Preload("Address").Where("id = ? AND user_id = ?", req.OrderID, userID).First(&order)
-	if order.ID == 0 {
+	if err := db.Preload("Address").Where("id = ? AND user_id = ?", req.OrderID, userID).First(&order).Error; err != nil {
+		utils.LogError("Order not found for ID: %d, user ID: %d", req.OrderID, userID)
 		utils.NotFound(c, "Order not found")
 		return
 	}
+	utils.LogInfo("Found order ID: %d for user ID: %d", order.ID, userID)
+
+	// Check if payment is already completed
+	if order.Status != "Placed" {
+		utils.LogError("Order payment already completed - Order ID: %d, Status: %s", order.ID, order.Status)
+		utils.BadRequest(c, "Payment for this order has already been completed", nil)
+		return
+	}
+
+	// Check if there's another pending payment for this order
+	if order.PaymentMethod == "RAZORPAY" || order.PaymentMethod == "online" {
+		utils.LogError("Payment already initiated for order ID: %d", order.ID)
+		utils.BadRequest(c, "A payment is already in progress for this order", nil)
+		return
+	}
+
 	// Razorpay expects amount in paise. Only multiply by 100 if FinalTotal is in rupees (float).
 	amountPaise := int(order.FinalTotal * 100)
 	if order.FinalTotal > 1000 { // If FinalTotal is already in paise, do not multiply
 		amountPaise = int(order.FinalTotal)
 	}
+	utils.LogInfo("Processing payment amount: %d paise for order ID: %d", amountPaise, order.ID)
+
 	client := razorpay.NewClient(os.Getenv("RAZORPAY_KEY"), os.Getenv("RAZORPAY_SECRET"))
 	orderData := map[string]interface{}{
 		"amount":          amountPaise,
@@ -53,9 +76,22 @@ func InitiateRazorpayPayment(c *gin.Context) {
 	}
 	rzOrder, err := client.Order.Create(orderData, nil)
 	if err != nil {
+		utils.LogError("Failed to create Razorpay order for order ID: %d: %v", order.ID, err)
 		utils.InternalServerError(c, "Failed to create Razorpay order", err.Error())
 		return
 	}
+	utils.LogInfo("Successfully created Razorpay order for order ID: %d", order.ID)
+
+	// Update order with Razorpay order ID
+	if err := db.Model(&order).Updates(map[string]interface{}{
+		"payment_method":    "RAZORPAY",
+		"razorpay_order_id": fmt.Sprintf("%v", rzOrder["id"]),
+	}).Error; err != nil {
+		utils.LogError("Failed to update order with Razorpay details for order ID: %d: %v", order.ID, err)
+		utils.InternalServerError(c, "Failed to update order details", err.Error())
+		return
+	}
+
 	utils.Success(c, "Payment initiated successfully", gin.H{
 		"address": gin.H{
 			"line1":       order.Address.Line1,
@@ -78,13 +114,16 @@ func InitiateRazorpayPayment(c *gin.Context) {
 
 // POST /user/checkout/payment/verify
 func VerifyRazorpayPayment(c *gin.Context) {
+	utils.LogInfo("VerifyRazorpayPayment called")
 	userVal, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found")
 		return
 	}
 	user := userVal.(models.User)
 	userID := user.ID
+	utils.LogInfo("Processing payment verification for user ID: %d", userID)
 
 	var req struct {
 		OrderID           uint   `json:"order_id" binding:"required"`
@@ -93,6 +132,7 @@ func VerifyRazorpayPayment(c *gin.Context) {
 		RazorpaySignature string `json:"razorpay_signature" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.LogError("Invalid request for user ID: %d: %v", userID, err)
 		utils.BadRequest(c, "Invalid request", err.Error())
 		return
 	}
@@ -104,46 +144,68 @@ func VerifyRazorpayPayment(c *gin.Context) {
 	h.Write([]byte(data))
 	generatedSignature := hex.EncodeToString(h.Sum(nil))
 	if generatedSignature != req.RazorpaySignature {
+		utils.LogError("Payment verification failed for order ID: %d, user ID: %d", req.OrderID, userID)
 		utils.BadRequest(c, "Payment verification failed", gin.H{"retry": true})
 		return
 	}
+	utils.LogInfo("Payment signature verified for order ID: %d", req.OrderID)
 
 	// Find existing order
 	db := config.DB
 	var order models.Order
 	if err := db.Where("id = ? AND user_id = ?", req.OrderID, userID).First(&order).Error; err != nil {
+		utils.LogError("Order not found for ID: %d, user ID: %d: %v", req.OrderID, userID, err)
 		utils.NotFound(c, "Order not found")
 		return
 	}
+	utils.LogInfo("Found order ID: %d for user ID: %d", order.ID, userID)
 
 	// Start transaction
 	tx := db.Begin()
 	if tx.Error != nil {
+		utils.LogError("Failed to start transaction for order ID: %d: %v", order.ID, tx.Error)
 		utils.InternalServerError(c, "Failed to start transaction", nil)
 		return
 	}
 
 	// Update order status
-	order.Status = "Placed"
-	order.PaymentMethod = "RAZORPAY"
-	if err := tx.Save(&order).Error; err != nil {
+	if err := tx.Model(&order).Updates(map[string]interface{}{
+		"status":         "Placed",
+		"payment_method": "RAZORPAY",
+		"payment_status": "completed",
+	}).Error; err != nil {
+		utils.LogError("Failed to update order ID: %d: %v", order.ID, err)
 		tx.Rollback()
 		utils.InternalServerError(c, "Failed to update order", err.Error())
 		return
 	}
+	utils.LogInfo("Updated order status for order ID: %d", order.ID)
 
 	// Clear cart
 	if err := tx.Where("user_id = ?", userID).Delete(&models.Cart{}).Error; err != nil {
+		utils.LogError("Failed to clear cart for user ID: %d: %v", userID, err)
 		tx.Rollback()
 		utils.InternalServerError(c, "Failed to clear cart", err.Error())
 		return
 	}
+	utils.LogInfo("Cleared cart for user ID: %d", userID)
+
+	// Clear active coupon
+	if err := tx.Where("user_id = ?", userID).Delete(&models.UserActiveCoupon{}).Error; err != nil {
+		utils.LogError("Failed to clear active coupon for user ID: %d: %v", userID, err)
+		tx.Rollback()
+		utils.InternalServerError(c, "Failed to clear active coupon", err.Error())
+		return
+	}
+	utils.LogInfo("Cleared active coupon for user ID: %d", userID)
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
+		utils.LogError("Failed to commit transaction for order ID: %d: %v", order.ID, err)
 		utils.InternalServerError(c, "Failed to commit transaction", err.Error())
 		return
 	}
+	utils.LogInfo("Successfully completed payment verification for order ID: %d", order.ID)
 
 	utils.Success(c, "Thank you for your payment! Your order has been placed.", gin.H{
 		"order_id":              order.ID,
@@ -156,35 +218,37 @@ func VerifyRazorpayPayment(c *gin.Context) {
 
 // GetPaymentMethods returns all available payment methods for checkout
 func GetPaymentMethods(c *gin.Context) {
+	utils.LogInfo("GetPaymentMethods called")
 	userVal, exists := c.Get("user")
 	if !exists {
+		utils.LogError("User not found in context")
 		utils.Unauthorized(c, "User not found")
 		return
 	}
 	user := userVal.(models.User)
+	utils.LogInfo("Processing payment methods for user ID: %d", user.ID)
+
+	// Get cart details to get the final total
+	cartDetails, err := utils.GetCartDetails(user.ID)
+	if err != nil {
+		utils.LogError("Failed to get cart details for user ID: %d: %v", user.ID, err)
+		utils.InternalServerError(c, "Failed to get cart details", err.Error())
+		return
+	}
+	finalTotal := cartDetails.FinalTotal
+	utils.LogInfo("Retrieved final total from cart: %.2f for user ID: %d", finalTotal, user.ID)
 
 	// Get or create wallet
 	wallet, err := getOrCreateWallet(user.ID)
 	if err != nil {
+		utils.LogError("Failed to get wallet for user ID: %d: %v", user.ID, err)
 		utils.InternalServerError(c, "Failed to get wallet", nil)
 		return
 	}
-
-	// Fetch final total from query parameters or request to check if wallet has enough balance
-	finalTotalStr := c.Query("total")
-	var finalTotal float64
-	if finalTotalStr != "" {
-		finalTotal, _ = strconv.ParseFloat(finalTotalStr, 64)
-	}
+	utils.LogInfo("Retrieved wallet for user ID: %d, balance: %.2f", user.ID, wallet.Balance)
 
 	// Available payment methods
 	paymentMethods := []gin.H{
-		{
-			"id":          "cod",
-			"name":        "Cash on Delivery",
-			"description": "Pay when you receive your order",
-			"available":   true,
-		},
 		{
 			"id":          "online",
 			"name":        "Online Payment",
@@ -201,8 +265,25 @@ func GetPaymentMethods(c *gin.Context) {
 		},
 	}
 
+	// Add COD only if amount is less than or equal to 1000
+	if finalTotal <= 1000 {
+		utils.LogInfo("Adding COD option for user ID: %d as amount (%.2f) is <= 1000", user.ID, finalTotal)
+		paymentMethods = append([]gin.H{
+			{
+				"id":          "cod",
+				"name":        "Cash on Delivery",
+				"description": "Pay when you receive your order",
+				"available":   true,
+			},
+		}, paymentMethods...)
+	} else {
+		utils.LogInfo("COD option not available for user ID: %d as amount (%.2f) is > 1000", user.ID, finalTotal)
+	}
+
+	utils.LogInfo("Successfully retrieved payment methods for user ID: %d", user.ID)
 	utils.Success(c, "Payment methods retrieved successfully", gin.H{
 		"payment_methods": paymentMethods,
 		"wallet_balance":  fmt.Sprintf("%.2f", wallet.Balance),
+		"final_total":     fmt.Sprintf("%.2f", finalTotal),
 	})
 }

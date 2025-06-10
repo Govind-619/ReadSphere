@@ -3,11 +3,14 @@ package routes
 import (
 	"github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/middleware"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
 // SetupUserProfileRoutes sets up the routes for user profile management
 func SetupUserProfileRoutes(router *gin.Engine) {
+	utils.LogInfo("Registering user profile routes")
+
 	// User profile routes (protected)
 	profile := router.Group("/v1/profile")
 	profile.Use(middleware.AuthMiddleware())
@@ -35,4 +38,6 @@ func SetupUserProfileRoutes(router *gin.Engine) {
 		profile.PUT("/address/:id/default", controllers.SetDefaultAddress)
 		profile.GET("/address", controllers.GetAddresses)
 	}
+
+	utils.LogInfo("User profile routes registration completed")
 }

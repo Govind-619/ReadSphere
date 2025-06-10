@@ -36,6 +36,8 @@ type TopSellingItem struct {
 
 // GetDashboardStats returns overall dashboard statistics
 func GetDashboardStats(c *gin.Context) {
+	utils.LogInfo("GetDashboardStats called")
+
 	var stats DashboardStats
 	var totalSales float64
 
@@ -47,27 +49,35 @@ func GetDashboardStats(c *gin.Context) {
 
 	// Format total sales with 2 decimal places
 	stats.TotalSales = fmt.Sprintf("%.2f", totalSales)
+	utils.LogDebug("Total sales calculated: %s", stats.TotalSales)
 
 	// Get total orders
 	config.DB.Model(&models.Order{}).
 		Where("status != ?", models.OrderStatusCancelled).
 		Count(&stats.TotalOrders)
+	utils.LogDebug("Total orders counted: %d", stats.TotalOrders)
 
 	// Get total customers
 	config.DB.Model(&models.User{}).Count(&stats.TotalCustomers)
+	utils.LogDebug("Total customers counted: %d", stats.TotalCustomers)
 
 	// Get total products
 	config.DB.Model(&models.Book{}).Count(&stats.TotalProducts)
+	utils.LogDebug("Total products counted: %d", stats.TotalProducts)
 
+	utils.LogInfo("Successfully retrieved dashboard statistics")
 	utils.Success(c, "Dashboard statistics retrieved successfully", stats)
 }
 
 // GetSalesChart returns sales data for charts with time-based filtering
 func GetSalesChart(c *gin.Context) {
+	utils.LogInfo("GetSalesChart called")
+
 	period := c.Query("period") // yearly, monthly, weekly, daily
 	if period == "" {
 		period = "monthly" // default to monthly
 	}
+	utils.LogDebug("Generating sales chart for period: %s", period)
 
 	var chartData SalesChartData
 	var query *gorm.DB
@@ -86,6 +96,7 @@ func GetSalesChart(c *gin.Context) {
 			Where("created_at >= ? AND status != ?", startTime, models.OrderStatusCancelled).
 			Group("period").
 			Order("period ASC")
+		utils.LogDebug("Yearly chart - Start time: %s", startTime.Format("2006-01-02"))
 	case "monthly":
 		startTime = now.AddDate(0, -12, 0)
 		timeFormat = "2006-01"
@@ -94,6 +105,7 @@ func GetSalesChart(c *gin.Context) {
 			Where("created_at >= ? AND status != ?", startTime, models.OrderStatusCancelled).
 			Group("period").
 			Order("period ASC")
+		utils.LogDebug("Monthly chart - Start time: %s", startTime.Format("2006-01-02"))
 	case "weekly":
 		startTime = now.AddDate(0, 0, -30)
 		timeFormat = "2006-01-02"
@@ -102,6 +114,7 @@ func GetSalesChart(c *gin.Context) {
 			Where("created_at >= ? AND status != ?", startTime, models.OrderStatusCancelled).
 			Group("period").
 			Order("period ASC")
+		utils.LogDebug("Weekly chart - Start time: %s", startTime.Format("2006-01-02"))
 	case "daily":
 		startTime = now.AddDate(0, 0, -30)
 		timeFormat = "2006-01-02"
@@ -110,7 +123,9 @@ func GetSalesChart(c *gin.Context) {
 			Where("created_at >= ? AND status != ?", startTime, models.OrderStatusCancelled).
 			Group("period").
 			Order("period ASC")
+		utils.LogDebug("Daily chart - Start time: %s", startTime.Format("2006-01-02"))
 	default:
+		utils.LogError("Invalid period specified: %s", period)
 		utils.BadRequest(c, "Invalid period. Must be one of: yearly, monthly, weekly, daily", nil)
 		return
 	}
@@ -121,7 +136,12 @@ func GetSalesChart(c *gin.Context) {
 		Total  float64
 	}
 	var results []Result
-	query.Find(&results)
+	if err := query.Find(&results).Error; err != nil {
+		utils.LogError("Failed to fetch sales data: %v", err)
+		utils.InternalServerError(c, "Failed to fetch sales data", err.Error())
+		return
+	}
+	utils.LogDebug("Retrieved %d data points for sales chart", len(results))
 
 	// Format data for response
 	for _, r := range results {
@@ -129,11 +149,14 @@ func GetSalesChart(c *gin.Context) {
 		chartData.Data = append(chartData.Data, fmt.Sprintf("%.2f", r.Total))
 	}
 
+	utils.LogInfo("Successfully generated sales chart for period %s", period)
 	utils.Success(c, "Sales chart data retrieved successfully", chartData)
 }
 
 // GetTopSellingProducts returns top 10 selling products
 func GetTopSellingProducts(c *gin.Context) {
+	utils.LogInfo("GetTopSellingProducts called")
+
 	type RawProduct struct {
 		ID          uint
 		Name        string
@@ -152,7 +175,12 @@ func GetTopSellingProducts(c *gin.Context) {
 		Order("total_sales DESC").
 		Limit(10)
 
-	query.Find(&rawProducts)
+	if err := query.Find(&rawProducts).Error; err != nil {
+		utils.LogError("Failed to fetch top selling products: %v", err)
+		utils.InternalServerError(c, "Failed to fetch top selling products", err.Error())
+		return
+	}
+	utils.LogDebug("Retrieved %d top selling products", len(rawProducts))
 
 	// Convert to formatted response
 	products := make([]TopSellingItem, len(rawProducts))
@@ -166,11 +194,14 @@ func GetTopSellingProducts(c *gin.Context) {
 		}
 	}
 
+	utils.LogInfo("Successfully retrieved top selling products")
 	utils.Success(c, "Top selling products retrieved successfully", products)
 }
 
 // GetTopSellingCategories returns top 10 selling categories
 func GetTopSellingCategories(c *gin.Context) {
+	utils.LogInfo("GetTopSellingCategories called")
+
 	type RawCategory struct {
 		ID          uint
 		Name        string
@@ -190,7 +221,12 @@ func GetTopSellingCategories(c *gin.Context) {
 		Order("total_sales DESC").
 		Limit(10)
 
-	query.Find(&rawCategories)
+	if err := query.Find(&rawCategories).Error; err != nil {
+		utils.LogError("Failed to fetch top selling categories: %v", err)
+		utils.InternalServerError(c, "Failed to fetch top selling categories", err.Error())
+		return
+	}
+	utils.LogDebug("Retrieved %d top selling categories", len(rawCategories))
 
 	// Convert to formatted response
 	categories := make([]TopSellingItem, len(rawCategories))
@@ -204,5 +240,6 @@ func GetTopSellingCategories(c *gin.Context) {
 		}
 	}
 
+	utils.LogInfo("Successfully retrieved top selling categories")
 	utils.Success(c, "Top selling categories retrieved successfully", categories)
 }

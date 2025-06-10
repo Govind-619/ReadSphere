@@ -78,6 +78,20 @@ func GetCartDetails(userID uint) (*CartDetails, error) {
 	totalDiscount := details.ProductDiscount + details.CategoryDiscount + details.CouponDiscount
 	details.FinalTotal = math.Round((details.Subtotal-totalDiscount)*100) / 100
 
+	var couponDiscountPerUnit float64
+	if details.CouponDiscount > 0 && len(details.OrderItems) > 0 {
+		var totalQuantity int
+		for _, item := range details.OrderItems {
+			totalQuantity += item.Quantity
+		}
+		if totalQuantity > 0 {
+			couponDiscountPerUnit = details.CouponDiscount / float64(totalQuantity)
+		}
+	}
+	for i := range details.OrderItems {
+		details.OrderItems[i].CouponDiscount = couponDiscountPerUnit * float64(details.OrderItems[i].Quantity)
+	}
+
 	return &details, nil
 }
 

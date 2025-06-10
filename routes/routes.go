@@ -33,12 +33,46 @@ func SetupRouter() *gin.Engine {
 		// Temporary test route to view all users
 		auth.GET("/test/users", func(c *gin.Context) {
 			var users []models.User
-			if err := config.DB.Find(&users).Error; err != nil {
-				utils.InternalServerError(c, "Internal Server Error", err.Error())
+			if err := config.DB.Order("created_at DESC").Find(&users).Error; err != nil {
+				utils.LogError("Failed to fetch users: %v", err)
+				utils.InternalServerError(c, "Failed to fetch users", err.Error())
 				return
 			}
+
+			// Create a slice to hold only necessary user details
+			var userDetails []gin.H
+			for _, user := range users {
+				// Log each user's details for debugging
+				utils.LogInfo("User found - ID: %d, Email: %s, GoogleID: %s, CreatedAt: %v",
+					user.ID, user.Email, user.GoogleID, user.CreatedAt)
+
+				userDetails = append(userDetails, gin.H{
+					"id":          user.ID,
+					"username":    user.Username,
+					"email":       user.Email,
+					"first_name":  user.FirstName,
+					"last_name":   user.LastName,
+					"is_verified": user.IsVerified,
+					"is_blocked":  user.IsBlocked,
+					"created_at":  user.CreatedAt,
+					"google_id":   user.GoogleID,
+					"last_login":  user.LastLoginAt,
+				})
+			}
+
+			// Log total count and Google users count
+			googleUsers := 0
+			for _, user := range users {
+				if user.GoogleID != "" {
+					googleUsers++
+				}
+			}
+
+			utils.LogInfo("Users retrieved successfully - Total: %d, Google Users: %d", len(users), googleUsers)
 			utils.Success(c, "Users retrieved successfully", gin.H{
-				"users": users,
+				"users":              userDetails,
+				"count":              len(users),
+				"google_users_count": googleUsers,
 			})
 		})
 	}
@@ -56,5 +90,6 @@ func SetupRouter() *gin.Engine {
 		SetupUserProfileRoutes(router)
 	}
 
+	utils.LogInfo("Routes setup completed")
 	return router
 }

@@ -70,4 +70,5 @@ type OrderItem struct {
 	RefundAmount          float64    `json:"refund_amount"`
 	RefundedAt            *time.Time `json:"refunded_at"`
 	StockRestored         bool       `json:"stock_restored" gorm:"default:false"`
+	CouponDiscount        float64    `json:"coupon_discount"`
 }

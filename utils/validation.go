@@ -281,3 +281,11 @@ func ValidateStringLength(str string, min, max int) error {
 	}
 	return nil
 }
+
+// ValidateCouponValue checks if the coupon value is valid based on its type
+func ValidateCouponValue(couponType string, value float64) error {
+	if couponType == "percent" && value > 100 {
+		return fmt.Errorf("percentage coupon value cannot exceed 100")
+	}
+	return nil
+}

@@ -1,4 +1,4 @@
-.PHONY: run build test clean migrate
+.PHONY: run build test clean migrate analyze-logs
 
 # Build the application
 build:
@@ -48,6 +48,11 @@ db-drop:
 # Reset database (drop and recreate)
 db-reset: db-drop db-create migrate
 
+# Analyze logs
+analyze-logs:
+	@echo "Analyzing logs..."
+	@go run scripts/analyze_logs.go
+
 # Help command
 help:
 	@echo "Available commands:"
@@ -63,4 +68,5 @@ help:
 	@echo "  make db-create  - Create database"
 	@echo "  make db-drop    - Drop database"
 	@echo "  make db-reset   - Reset database"
+	@echo "  make analyze-logs - Analyze logs"
 	@echo "  make help       - Show this help message" 

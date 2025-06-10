@@ -3,12 +3,14 @@ package routes
 import (
 	"github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/middleware"
-
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
 // initAdminRoutes initializes all admin-related routes
 func initAdminRoutes(router *gin.RouterGroup) {
+	utils.LogInfo("Registering admin routes")
+
 	admin := router.Group("/admin")
 	{
 		// Public admin routes
@@ -112,4 +114,6 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			}
 		}
 	}
+
+	utils.LogInfo("Admin routes registration completed")
 }

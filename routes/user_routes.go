@@ -6,14 +6,18 @@ import (
 	"github.com/Govind-619/ReadSphere/controllers"
 	paymentcontroller "github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/middleware"
+	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
 )
 
 // initUserRoutes initializes all user-related routes
 func initUserRoutes(router *gin.RouterGroup) {
+	utils.LogInfo("Initializing user routes")
+
 	// Public routes (no authentication required)
 	// Page routes
 	router.GET("/login", func(c *gin.Context) {
+		utils.LogInfo("Login page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Login page loaded successfully",
 			"status":  "success",
@@ -21,6 +25,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	})
 
 	router.GET("/signup", func(c *gin.Context) {
+		utils.LogInfo("Signup page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Signup page loaded successfully",
 			"status":  "success",
@@ -28,6 +33,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	})
 
 	router.GET("/verify-otp", func(c *gin.Context) {
+		utils.LogInfo("Verify OTP page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Verify OTP page loaded successfully",
 			"status":  "success",
@@ -35,6 +41,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	})
 
 	router.GET("/forgot-password", func(c *gin.Context) {
+		utils.LogInfo("Forgot password page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Forgot password page loaded successfully",
 			"status":  "success",
@@ -42,6 +49,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	})
 
 	router.GET("/verify-reset-otp", func(c *gin.Context) {
+		utils.LogInfo("Verify reset OTP page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Verify reset OTP page loaded successfully",
 			"status":  "success",
@@ -49,6 +57,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	})
 
 	router.GET("/reset-password", func(c *gin.Context) {
+		utils.LogInfo("Reset password page accessed")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Reset password page loaded successfully",
 			"status":  "success",
@@ -127,4 +136,6 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.POST("/wallet/topup/initiate", controllers.InitiateWalletTopup)
 		protected.POST("/wallet/topup/verify", controllers.VerifyWalletTopup)
 	}
+
+	utils.LogInfo("User routes initialization completed")
 }
