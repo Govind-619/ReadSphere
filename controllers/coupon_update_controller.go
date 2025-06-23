@@ -88,6 +88,22 @@ func UpdateCoupon(c *gin.Context) {
 		return
 	}
 
+	// Validate percent coupon value if type or value is being updated
+	couponType := coupon.Type
+	if req.Type != "" {
+		couponType = req.Type
+	}
+	couponValue := coupon.Value
+	if req.Value > 0 {
+		couponValue = req.Value
+	}
+	if err := utils.ValidateCouponValue(couponType, couponValue); err != nil {
+		tx.Rollback()
+		utils.LogError("Invalid coupon value for coupon %s: %v", coupon.Code, err)
+		utils.BadRequest(c, err.Error(), nil)
+		return
+	}
+
 	// Update fields if provided
 	updates := make(map[string]interface{})
 	if req.Type != "" {

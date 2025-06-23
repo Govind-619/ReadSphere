@@ -107,6 +107,13 @@ func GoogleCallback(c *gin.Context) {
 			return
 		}
 		utils.LogInfo("New user created via Google login: %s", user.Email)
+
+		// Create referral code for the new Google user
+		_, err = GetOrCreateUserReferralCode(user.ID)
+		if err != nil {
+			utils.LogError("Failed to create referral code for new Google user: %s - %v", user.Email, err)
+			// Don't fail Google login if referral code creation fails
+		}
 	}
 
 	// Generate JWT token

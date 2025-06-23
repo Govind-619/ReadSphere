@@ -79,8 +79,7 @@ func initUserRoutes(router *gin.RouterGroup) {
 	router.GET("/categories/:id/books", controllers.ListBooksByCategory)
 
 	// Referral routes
-	router.GET("/referral/:token", controllers.GetReferralToken)
-	router.GET("/referral/invite/:token", controllers.AcceptReferralToken)
+	router.GET("/referral/:code", controllers.GetReferralCodeInfo)
 
 	// Protected routes (require authentication)
 	// Referral: Accept referral via token (public, user must sign up and then visit link)
@@ -135,6 +134,12 @@ func initUserRoutes(router *gin.RouterGroup) {
 		protected.GET("/wallet/transactions", controllers.GetWalletTransactions)
 		protected.POST("/wallet/topup/initiate", controllers.InitiateWalletTopup)
 		protected.POST("/wallet/topup/verify", controllers.VerifyWalletTopup)
+		// Test wallet topup payment simulation (only in development)
+		protected.GET("/wallet/topup/simulate", controllers.SimulateWalletTopupPayment)
+
+		// User referral routes
+		protected.GET("/referral/code", controllers.GetUserReferralCode)
+		protected.GET("/referral/list", controllers.GetUserReferrals)
 	}
 
 	utils.LogInfo("User routes initialization completed")

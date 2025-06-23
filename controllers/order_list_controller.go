@@ -70,8 +70,10 @@ func ListOrders(c *gin.Context) {
 
 	// Apply sorting
 	switch sortBy {
-	case "id", "status", "final_total", "created_at":
+	case "id", "status", "created_at":
 		query = query.Order(fmt.Sprintf("%s %s", sortBy, order))
+	case "final_total":
+		query = query.Order(fmt.Sprintf("total_with_delivery %s", order))
 	default:
 		query = query.Order(fmt.Sprintf("created_at %s", order))
 	}
@@ -93,7 +95,7 @@ func ListOrders(c *gin.Context) {
 			"id":           o.ID,
 			"date":         o.CreatedAt.Format("2006-01-02 15:04:05"),
 			"status":       o.Status,
-			"final_total":  fmt.Sprintf("%.2f", o.FinalTotal),
+			"final_total":  fmt.Sprintf("%.2f", o.TotalWithDelivery),
 			"item_count":   len(o.OrderItems),
 			"payment_mode": o.PaymentMethod,
 		})
@@ -176,6 +178,27 @@ func GetOrderDetails(c *gin.Context) {
 		"postal_code": order.Address.PostalCode,
 	}
 
+	// Calculate action availability with better logic
+	timeSinceOrder := time.Since(order.CreatedAt)
+
+	// For cancel action: check if order is within 30 minutes AND has appropriate status
+	// Handle cases where order creation time might be in the future or there are timezone issues
+	canCancel := false
+
+	// Check if order creation time is in the future (timezone/system clock issue)
+	if timeSinceOrder < 0 {
+		utils.LogError("Order ID: %d has future creation time: %s (time since order: %v)",
+			order.ID, order.CreatedAt.Format("2006-01-02 15:04:05"), timeSinceOrder)
+	} else if timeSinceOrder > 30*time.Minute {
+		// Cancellation window expired
+	} else if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusPaid {
+		// Order status doesn't allow cancellation
+	} else {
+		canCancel = true
+	}
+
+	canReturn := order.Status == models.OrderStatusDelivered
+
 	resp := gin.H{
 		"order_id":        order.ID,
 		"date":            order.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -187,11 +210,12 @@ func GetOrderDetails(c *gin.Context) {
 		"discount":        fmt.Sprintf("%.2f", order.Discount),
 		"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
 		"coupon_code":     order.CouponCode,
-		"final_total":     fmt.Sprintf("%.2f", order.FinalTotal),
+		"subtotal":        fmt.Sprintf("%.2f", order.FinalTotal),
+		"delivery_charge": fmt.Sprintf("%.2f", order.DeliveryCharge),
+		"final_total":     fmt.Sprintf("%.2f", order.TotalWithDelivery),
 		"actions": gin.H{
-			"can_cancel": time.Since(order.CreatedAt) <= 30*time.Minute &&
-				(order.Status == models.OrderStatusPlaced || order.Status == models.OrderStatusProcessing),
-			"can_return": order.Status == models.OrderStatusDelivered,
+			"can_cancel": canCancel,
+			"can_return": canReturn,
 		},
 	}
 

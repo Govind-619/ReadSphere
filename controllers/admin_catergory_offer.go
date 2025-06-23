@@ -65,6 +65,13 @@ func UpdateCategoryOffer(c *gin.Context) {
 		return
 	}
 
+	// Validate discount_percent
+	if req.DiscountPercent > 100 {
+		utils.LogError("Discount percent cannot exceed 100: %f", req.DiscountPercent)
+		utils.BadRequest(c, "Discount percent cannot exceed 100", nil)
+		return
+	}
+
 	// Update fields if provided
 	if req.DiscountPercent != 0 {
 		offer.DiscountPercent = req.DiscountPercent

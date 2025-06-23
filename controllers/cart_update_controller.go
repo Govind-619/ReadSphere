@@ -58,7 +58,8 @@ func UpdateCart(c *gin.Context) {
 		return
 	}
 
-	if req.Action == "increment" {
+	switch req.Action {
+	case "increment":
 		if cart.Quantity >= maxQuantity {
 			utils.LogError("Max quantity reached for book ID: %d, current: %d, max: %d", req.BookID, cart.Quantity, maxQuantity)
 			utils.BadRequest(c, "Max quantity reached", nil)
@@ -72,7 +73,7 @@ func UpdateCart(c *gin.Context) {
 		cart.Quantity++
 		db.Save(&cart)
 		utils.LogInfo("Incremented quantity for book ID: %d to %d", req.BookID, cart.Quantity)
-	} else if req.Action == "decrement" {
+	case "decrement":
 		if cart.Quantity <= 1 {
 			db.Delete(&cart)
 			utils.LogInfo("Removed cart item for book ID: %d (quantity was 1)", req.BookID)
@@ -81,7 +82,7 @@ func UpdateCart(c *gin.Context) {
 			db.Save(&cart)
 			utils.LogInfo("Decremented quantity for book ID: %d to %d", req.BookID, cart.Quantity)
 		}
-	} else {
+	default:
 		utils.LogError("Invalid action: %s for book ID: %d", req.Action, req.BookID)
 		utils.BadRequest(c, "Invalid action", nil)
 		return

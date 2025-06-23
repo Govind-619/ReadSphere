@@ -3,13 +3,11 @@ package controllers
 import (
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
 	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // ReturnOrderItem submits a request to return a single item from a delivered order
@@ -115,21 +113,14 @@ func ReturnOrderItem(c *gin.Context) {
 	}
 
 	// Calculate refund amount for this item
-	refundAmount := item.Price*float64(item.Quantity) - item.Discount
-
-	if order.CouponDiscount > 0 {
-		// Calculate the proportion of the returned item's total to the original order total
-		originalOrderTotal := order.TotalAmount
-		returnedItemTotal := item.Price*float64(item.Quantity) - item.Discount // Use discounted total
-		couponDiscountToRemove := (returnedItemTotal / originalOrderTotal) * order.CouponDiscount
-		refundAmount -= couponDiscountToRemove
-	}
-	utils.LogInfo("Calculated refund amount: %.2f for order ID: %d, book ID: %d", refundAmount, order.ID, item.BookID)
+	// Use the final price the customer actually paid for this item
+	refundAmount := item.Total - item.CouponDiscount // This is the final price after all discounts
+	utils.LogInfo("Calculated refund amount: %.2f for order ID: %d, book ID: %d (using existing item data)", refundAmount, order.ID, item.BookID)
 
 	// Update item status
 	item.ReturnRequested = true
 	item.ReturnReason = req.Reason
-	item.ReturnStatus = "Returned"
+	item.ReturnStatus = "Pending"
 	item.RefundStatus = "pending"
 	item.RefundAmount = refundAmount
 
@@ -139,128 +130,47 @@ func ReturnOrderItem(c *gin.Context) {
 		utils.InternalServerError(c, "Failed to update order item", nil)
 		return
 	}
-	utils.LogDebug("Updated item status to returned - Item ID: %d", itemID)
+	utils.LogDebug("Updated item status to pending - Item ID: %d", itemID)
 
-	// Update book stock
-	if err := tx.Model(&models.Book{}).Where("id = ?", item.BookID).UpdateColumn("stock", gorm.Expr("stock + ?", item.Quantity)).Error; err != nil {
-		utils.LogError("Failed to update book stock for book ID: %d: %v", item.BookID, err)
-		tx.Rollback()
-		utils.InternalServerError(c, "Failed to update book stock", err.Error())
-		return
-	}
-	utils.LogInfo("Updated book stock for book ID: %d, added: %d", item.BookID, item.Quantity)
-
-	// Prepare response based on payment method
-	itemResponse := gin.H{
-		"id":            item.ID,
-		"return_status": "Returned",
-		"return_reason": req.Reason,
-		"refund_amount": fmt.Sprintf("%.2f", refundAmount),
-		"refund_details": gin.H{
-			"item_total":      fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
-			"item_discount":   fmt.Sprintf("%.2f", item.Discount),
-			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
-			"total_refunded":  fmt.Sprintf("%.2f", refundAmount),
-			"refund_status":   "pending",
-			"refunded_to":     "wallet",
-		},
-	}
-
-	// Handle refund based on payment method
-	if order.PaymentMethod == "COD" || order.PaymentMethod == "cod" {
-		utils.LogDebug("No refund applicable for COD order - Order ID: %d, Item ID: %d", orderID, itemID)
-		itemResponse["refund_status"] = "No refund applicable for COD orders"
-	} else {
-		utils.LogDebug("Processing refund for non-COD order - Order ID: %d, Item ID: %d", orderID, itemID)
-		wallet, err := utils.GetOrCreateWallet(user.ID)
-		if err != nil {
-			utils.LogError("Failed to get wallet for user ID: %d, item ID: %d: %v", user.ID, itemID, err)
-			tx.Rollback()
-			utils.InternalServerError(c, "Failed to process refund", nil)
-			return
-		}
-
-		// Create refund transaction
-		reference := fmt.Sprintf("REFUND-ORDER-%d-ITEM-%d", orderID, itemID)
-		description := fmt.Sprintf("Refund for returned item in order #%d", orderID)
-
-		transaction, err := utils.CreateWalletTransaction(wallet.ID, refundAmount, models.TransactionTypeCredit, description, &order.ID, reference)
-		if err != nil {
-			utils.LogError("Failed to create refund transaction - Item ID: %d: %v", itemID, err)
-			tx.Rollback()
-			utils.InternalServerError(c, "Failed to create refund transaction", nil)
-			return
-		}
-		utils.LogDebug("Created wallet transaction - Transaction ID: %d, Amount: %.2f", transaction.ID, transaction.Amount)
-
-		// Update wallet balance
-		if err := utils.UpdateWalletBalance(wallet.ID, refundAmount, models.TransactionTypeCredit); err != nil {
-			utils.LogError("Failed to update wallet balance - Wallet ID: %d, Item ID: %d: %v", wallet.ID, itemID, err)
-			tx.Rollback()
-			utils.InternalServerError(c, "Failed to update wallet balance", nil)
-			return
-		}
-		utils.LogDebug("Updated wallet balance - Wallet ID: %d, Amount: %.2f", wallet.ID, refundAmount)
-
-		// Update refund status in order item
-		item.RefundStatus = "completed"
-		item.RefundAmount = refundAmount
-		now := time.Now()
-		item.RefundedAt = &now
-		if err := tx.Save(&item).Error; err != nil {
-			utils.LogError("Failed to update refund status - Item ID: %d: %v", itemID, err)
-			tx.Rollback()
-			utils.InternalServerError(c, "Failed to update refund status", nil)
-			return
-		}
-		utils.LogDebug("Updated item refund status to completed - Item ID: %d", itemID)
-
-		itemResponse["refund_details"] = gin.H{
-			"item_total":      fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
-			"item_discount":   fmt.Sprintf("%.2f", item.Discount),
-			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
-			"total_refunded":  fmt.Sprintf("%.2f", refundAmount),
-			"refund_status":   "completed",
-			"refunded_to":     "wallet",
-			"transaction": gin.H{
-				"id":          transaction.ID,
-				"wallet_id":   transaction.WalletID,
-				"amount":      fmt.Sprintf("%.2f", transaction.Amount),
-				"type":        transaction.Type,
-				"description": transaction.Description,
-				"order_id":    transaction.OrderID,
-				"reference":   transaction.Reference,
-				"status":      "success",
-			},
-		}
-		itemResponse["wallet"] = gin.H{
-			"balance": fmt.Sprintf("%.2f", wallet.Balance),
-		}
-	}
-
-	// Update order totals
-	order.TotalAmount -= item.Price * float64(item.Quantity)
-	order.Discount -= item.Discount
-
-	// Recalculate coupon discount proportionally
-	if order.CouponDiscount > 0 {
-		// Calculate the proportion of the returned item's total to the original order total
-		originalOrderTotal := order.TotalAmount + (item.Price * float64(item.Quantity))
-		returnedItemTotal := item.Price*float64(item.Quantity) - item.Discount
-		couponDiscountToRemove := (returnedItemTotal / originalOrderTotal) * order.CouponDiscount
-		order.CouponDiscount -= couponDiscountToRemove
-	}
-
-	// Calculate final total after all adjustments
-	order.FinalTotal = order.TotalAmount - order.Discount - order.CouponDiscount
-
+	// Update order to indicate it has return requests
+	order.HasItemReturnRequests = true
 	if err := tx.Save(&order).Error; err != nil {
-		utils.LogError("Failed to update order totals - Order ID: %d: %v", orderID, err)
+		utils.LogError("Failed to update order return requests flag - Order ID: %d: %v", orderID, err)
 		tx.Rollback()
 		utils.InternalServerError(c, "Failed to update order", nil)
 		return
 	}
-	utils.LogDebug("Updated order totals - Order ID: %d, New Total: %.2f", orderID, order.FinalTotal)
+	utils.LogDebug("Updated order return requests flag - Order ID: %d", orderID)
+
+	// Note: Stock will be restored when admin approves the return request
+	// Do not restore stock immediately as return requires admin approval
+
+	// Prepare response - returns should show pending status since they require admin approval
+	itemResponse := gin.H{
+		"id":            item.ID,
+		"return_status": "Pending",
+		"return_reason": req.Reason,
+		"refund_amount": fmt.Sprintf("%.2f", refundAmount),
+		"refund_details": gin.H{
+			"item_total":       fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
+			"item_discount":    fmt.Sprintf("%.2f", item.Discount),
+			"coupon_discount":  fmt.Sprintf("%.2f", item.CouponDiscount),
+			"final_price_paid": fmt.Sprintf("%.2f", item.Total-item.CouponDiscount),
+			"total_refunded":   fmt.Sprintf("%.2f", refundAmount),
+			"refund_status":    "pending",
+			"refunded_to":      "wallet",
+		},
+	}
+
+	// Calculate projected order totals after return (for response display only)
+	// Use existing order data and simply subtract the refund amount
+	projectedFinalTotal := order.FinalTotal - refundAmount
+
+	// Note: Refunds for returns are processed by admin approval, not immediately
+	// The refund will be processed when admin approves the return request
+
+	// Note: Order totals will be updated when admin approves the return request
+	// Do not update order totals immediately as return requires admin approval
 
 	if err := tx.Commit().Error; err != nil {
 		utils.LogError("Failed to commit transaction - Order ID: %d: %v", orderID, err)
@@ -269,15 +179,18 @@ func ReturnOrderItem(c *gin.Context) {
 	}
 	utils.LogInfo("Successfully committed transaction for order ID: %d, item ID: %d", orderID, itemID)
 
-	utils.Success(c, "Item returned successfully", gin.H{
+	utils.Success(c, "Return request submitted successfully", gin.H{
 		"item": itemResponse,
 		"order": gin.H{
-			"id":              order.ID,
-			"total_amount":    fmt.Sprintf("%.2f", order.TotalAmount),
-			"discount":        fmt.Sprintf("%.2f", order.Discount),
-			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
-			"coupon_code":     order.CouponCode,
-			"final_total":     fmt.Sprintf("%.2f", order.FinalTotal),
+			"id":                  order.ID,
+			"total_amount":        fmt.Sprintf("%.2f", order.TotalAmount),
+			"discount":            fmt.Sprintf("%.2f", order.Discount),
+			"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+			"coupon_code":         order.CouponCode,
+			"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+			"total_with_delivery": fmt.Sprintf("%.2f", projectedFinalTotal+order.DeliveryCharge),
+			"final_total":         fmt.Sprintf("%.2f", projectedFinalTotal),
 		},
+		"note": "Your return request has been submitted. Our team will review it and process accordingly. The order totals shown above reflect the projected amounts after return processing.",
 	})
 }

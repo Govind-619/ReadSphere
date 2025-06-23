@@ -23,10 +23,10 @@ func AdminListProductsWithStock(c *gin.Context) {
 		query = query.Where("category_id = ?", category)
 	}
 	if blocked := c.Query("blocked"); blocked != "" {
-		q := strings.ToLower(blocked)
-		if q == "true" {
+		switch q := strings.ToLower(blocked); q {
+		case "true":
 			query = query.Where("blocked = ?", true)
-		} else if q == "false" {
+		case "false":
 			query = query.Where("blocked = ?", false)
 		}
 	}

@@ -15,6 +15,7 @@ func initAdminRoutes(router *gin.RouterGroup) {
 	{
 		// Public admin routes
 		admin.GET("/login", func(c *gin.Context) {
+			utils.LogInfo("Admin login page loaded successfully")
 			c.JSON(200, gin.H{
 				"message": "Admin login page loaded successfully",
 				"status":  "success",
@@ -96,8 +97,10 @@ func initAdminRoutes(router *gin.RouterGroup) {
 			adminOffers.DELETE("/categories/:id", controllers.DeleteCategoryOffer)
 
 			// Referral management (admin)
-			admin.POST("/referral/generate", controllers.GenerateReferralToken)
-			admin.GET("/referrals", controllers.GetAllReferrals)
+			admin.GET("/referrals", controllers.GetAllUserReferralCodes)
+			admin.GET("/referrals/stats", controllers.GetReferralStatistics)
+			admin.GET("/referrals/user/:user_id", controllers.GetUserReferralStats)
+			admin.POST("/referrals/toggle", controllers.ToggleReferralCodeStatus)
 
 			// Sales report endpoints (admin)
 			admin.GET("/sales/report", controllers.GenerateSalesReport)
@@ -112,6 +115,13 @@ func initAdminRoutes(router *gin.RouterGroup) {
 				dashboard.GET("/top-products", controllers.GetTopSellingProducts)
 				dashboard.GET("/top-categories", controllers.GetTopSellingCategories)
 			}
+
+			// Delivery charge management
+			admin.GET("/delivery-charges", controllers.GetDeliveryCharges)
+			admin.POST("/delivery-charges", controllers.AddDeliveryCharge)
+			admin.PUT("/delivery-charges/:id", controllers.UpdateDeliveryCharge)
+			admin.DELETE("/delivery-charges/:id", controllers.DeleteDeliveryCharge)
+			admin.GET("/delivery-charges/pincode/:pincode", controllers.GetDeliveryChargeByPincode)
 		}
 	}
 

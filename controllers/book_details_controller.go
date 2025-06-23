@@ -82,6 +82,13 @@ func GetBookDetails(c *gin.Context) {
 		return
 	}
 
+	// Add this check for not found
+	if book.ID == 0 {
+		utils.LogError("Book not found: %s", bookID)
+		utils.NotFound(c, "Book not found")
+		return
+	}
+
 	utils.LogInfo("Book found in database: %s (ID: %s, Blocked: %v, Active: %v)",
 		book.Name, bookID, book.Blocked, book.IsActive)
 

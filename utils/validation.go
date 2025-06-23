@@ -189,6 +189,37 @@ func ValidatePassword(password string) (bool, string) {
 	return true, ""
 }
 
+// FormatPhoneNumber formats and validates an Indian phone number
+func FormatPhoneNumber(phone string) (string, error) {
+	// Remove all non-digit characters
+	phone = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, phone)
+
+	// Remove leading '0' or '+91' if present
+	if strings.HasPrefix(phone, "0") {
+		phone = phone[1:]
+	}
+	if strings.HasPrefix(phone, "91") {
+		phone = phone[2:]
+	}
+
+	// Check if the number is exactly 10 digits
+	if len(phone) != 10 {
+		return "", fmt.Errorf("phone number must be exactly 10 digits")
+	}
+
+	// Check if the number starts with a valid digit (6-9)
+	if phone[0] < '6' || phone[0] > '9' {
+		return "", fmt.Errorf("phone number must start with 6, 7, 8, or 9")
+	}
+
+	return phone, nil
+}
+
 // ValidatePhone checks if the phone number is valid
 func ValidatePhone(phone string) (bool, string) {
 	if phone == "" {
@@ -203,10 +234,13 @@ func ValidatePhone(phone string) (bool, string) {
 		return false, "Phone: " + msg
 	}
 
-	if !phoneRegex.MatchString(phone) {
-		return false, "Invalid phone number format. Please enter a valid phone number"
+	// Format and validate the phone number
+	formattedPhone, err := FormatPhoneNumber(phone)
+	if err != nil {
+		return false, err.Error()
 	}
-	return true, ""
+
+	return true, formattedPhone
 }
 
 // ValidateName checks if the name is valid and safe

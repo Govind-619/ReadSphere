@@ -93,6 +93,14 @@ func InitiateRazorpayPayment(c *gin.Context) {
 	}
 
 	utils.Success(c, "Payment initiated successfully", gin.H{
+		"order": gin.H{
+			"id":                order.ID,
+			"razorpay_order_id": rzOrder["id"],
+			"amount":            fmt.Sprintf("%.2f", order.FinalTotal),
+			"delivery_charge":   fmt.Sprintf("%.2f", order.DeliveryCharge),
+			"total_amount":      fmt.Sprintf("%.2f", order.TotalWithDelivery),
+			"amount_display":    fmt.Sprintf("₹%.2f", order.TotalWithDelivery),
+		},
 		"address": gin.H{
 			"line1":       order.Address.Line1,
 			"line2":       order.Address.Line2,
@@ -101,10 +109,7 @@ func InitiateRazorpayPayment(c *gin.Context) {
 			"country":     order.Address.Country,
 			"postal_code": order.Address.PostalCode,
 		},
-		"amount_display":    fmt.Sprintf("₹%.2f", float64(amountPaise)/100),
-		"order_id":          order.ID,
-		"razorpay_order_id": rzOrder["id"],
-		"key":               os.Getenv("RAZORPAY_KEY"),
+		"key": os.Getenv("RAZORPAY_KEY"),
 		"user": gin.H{
 			"name":  user.Username,
 			"email": user.Email,
@@ -160,6 +165,15 @@ func VerifyRazorpayPayment(c *gin.Context) {
 	}
 	utils.LogInfo("Found order ID: %d for user ID: %d", order.ID, userID)
 
+	// Verify that the Razorpay order ID matches
+	if order.RazorpayOrderID != req.RazorpayOrderID {
+		utils.LogError("Razorpay order ID mismatch for order ID: %d. Expected: %s, Received: %s",
+			req.OrderID, order.RazorpayOrderID, req.RazorpayOrderID)
+		utils.BadRequest(c, "Invalid Razorpay order ID", nil)
+		return
+	}
+	utils.LogInfo("Razorpay order ID verified for order ID: %d", req.OrderID)
+
 	// Start transaction
 	tx := db.Begin()
 	if tx.Error != nil {
@@ -169,8 +183,9 @@ func VerifyRazorpayPayment(c *gin.Context) {
 	}
 
 	// Update order status
+	utils.LogInfo("Updating order ID: %d, current status: %s, new status: Paid", order.ID, order.Status)
 	if err := tx.Model(&order).Updates(map[string]interface{}{
-		"status":         "Placed",
+		"status":         "Paid",
 		"payment_method": "RAZORPAY",
 		"payment_status": "completed",
 	}).Error; err != nil {
@@ -179,7 +194,7 @@ func VerifyRazorpayPayment(c *gin.Context) {
 		utils.InternalServerError(c, "Failed to update order", err.Error())
 		return
 	}
-	utils.LogInfo("Updated order status for order ID: %d", order.ID)
+	utils.LogInfo("Successfully updated order status to 'Paid' for order ID: %d", order.ID)
 
 	// Clear cart
 	if err := tx.Where("user_id = ?", userID).Delete(&models.Cart{}).Error; err != nil {
@@ -209,7 +224,9 @@ func VerifyRazorpayPayment(c *gin.Context) {
 
 	utils.Success(c, "Thank you for your payment! Your order has been placed.", gin.H{
 		"order_id":              order.ID,
-		"final_total":           fmt.Sprintf("%.2f", order.FinalTotal),
+		"subtotal":              fmt.Sprintf("%.2f", order.FinalTotal),
+		"delivery_charge":       fmt.Sprintf("%.2f", order.DeliveryCharge),
+		"final_total":           fmt.Sprintf("%.2f", order.TotalWithDelivery),
 		"payment_method":        order.PaymentMethod,
 		"order_details_url":     "/user/orders/" + strconv.FormatUint(uint64(order.ID), 10),
 		"continue_shopping_url": "/books",
@@ -238,6 +255,19 @@ func GetPaymentMethods(c *gin.Context) {
 	finalTotal := cartDetails.FinalTotal
 	utils.LogInfo("Retrieved final total from cart: %.2f for user ID: %d", finalTotal, user.ID)
 
+	// Get delivery charge for default address
+	var deliveryCharge float64 = 50.0 // Default
+	var defaultAddress models.Address
+	if err := config.DB.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultAddress).Error; err == nil {
+		charge, err := utils.GetDeliveryCharge(defaultAddress.PostalCode, finalTotal)
+		if err == nil {
+			deliveryCharge = charge
+		}
+	}
+
+	totalWithDelivery := finalTotal + deliveryCharge
+	utils.LogInfo("Calculated delivery charge: %.2f, total with delivery: %.2f for user ID: %d", deliveryCharge, totalWithDelivery, user.ID)
+
 	// Get or create wallet
 	wallet, err := getOrCreateWallet(user.ID)
 	if err != nil {
@@ -255,19 +285,22 @@ func GetPaymentMethods(c *gin.Context) {
 			"description": "Pay securely with Razorpay",
 			"available":   true,
 		},
-		{
-			"id":           "wallet",
-			"name":         "Wallet",
-			"description":  fmt.Sprintf("Pay using your wallet balance (₹%.2f available)", wallet.Balance),
-			"available":    finalTotal == 0 || wallet.Balance >= finalTotal,
-			"balance":      fmt.Sprintf("%.2f", wallet.Balance),
-			"insufficient": finalTotal > 0 && wallet.Balance < finalTotal,
-		},
+	}
+
+	// Only add wallet if balance is sufficient or cart is free
+	if totalWithDelivery == 0 || wallet.Balance >= totalWithDelivery {
+		paymentMethods = append(paymentMethods, gin.H{
+			"id":          "wallet",
+			"name":        "Wallet",
+			"description": fmt.Sprintf("Pay using your wallet balance (₹%.2f available)", wallet.Balance),
+			"available":   true,
+			"balance":     fmt.Sprintf("%.2f", wallet.Balance),
+		})
 	}
 
 	// Add COD only if amount is less than or equal to 1000
-	if finalTotal <= 1000 {
-		utils.LogInfo("Adding COD option for user ID: %d as amount (%.2f) is <= 1000", user.ID, finalTotal)
+	if totalWithDelivery <= 1000 {
+		utils.LogInfo("Adding COD option for user ID: %d as amount (%.2f) is <= 1000", user.ID, totalWithDelivery)
 		paymentMethods = append([]gin.H{
 			{
 				"id":          "cod",
@@ -277,13 +310,15 @@ func GetPaymentMethods(c *gin.Context) {
 			},
 		}, paymentMethods...)
 	} else {
-		utils.LogInfo("COD option not available for user ID: %d as amount (%.2f) is > 1000", user.ID, finalTotal)
+		utils.LogInfo("COD option not available for user ID: %d as amount (%.2f) is > 1000", user.ID, totalWithDelivery)
 	}
 
 	utils.LogInfo("Successfully retrieved payment methods for user ID: %d", user.ID)
 	utils.Success(c, "Payment methods retrieved successfully", gin.H{
-		"payment_methods": paymentMethods,
-		"wallet_balance":  fmt.Sprintf("%.2f", wallet.Balance),
-		"final_total":     fmt.Sprintf("%.2f", finalTotal),
+		"payment_methods":     paymentMethods,
+		"wallet_balance":      fmt.Sprintf("%.2f", wallet.Balance),
+		"final_total":         fmt.Sprintf("%.2f", finalTotal),
+		"delivery_charge":     fmt.Sprintf("%.2f", deliveryCharge),
+		"total_with_delivery": fmt.Sprintf("%.2f", totalWithDelivery),
 	})
 }

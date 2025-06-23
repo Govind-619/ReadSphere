@@ -113,17 +113,8 @@ func AdminReviewItemCancellation(c *gin.Context) {
 			}
 
 			// Calculate refund amount for this item
-			itemTotal := item.Total
-
-			// Calculate equal coupon discount per item
-			var couponDiscountPerItem float64
-			if order.CouponDiscount > 0 && len(order.OrderItems) > 0 {
-				// Distribute coupon discount equally among all items
-				couponDiscountPerItem = order.CouponDiscount / float64(len(order.OrderItems))
-			}
-
-			// Final refund amount is item total minus equal coupon discount per item
-			refundAmount := itemTotal - couponDiscountPerItem
+			// Use the final price the customer actually paid for this item
+			refundAmount := item.Total - item.CouponDiscount // This is the final price after all discounts
 
 			// Create a wallet transaction
 			reference := fmt.Sprintf("REFUND-ORDER-%d-ITEM-%d", orderID, itemID)

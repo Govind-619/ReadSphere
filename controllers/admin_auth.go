@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
@@ -98,9 +99,50 @@ func AdminLogin(c *gin.Context) {
 // AdminLogout handles admin logout
 func AdminLogout(c *gin.Context) {
 	utils.LogInfo("AdminLogout called")
-	// In a JWT-based system, logout is handled client-side by removing the token
-	// We can add additional server-side cleanup if needed
-	utils.LogDebug("Client-side logout processed")
+
+	// Get the token from the Authorization header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		utils.LogError("Missing Authorization header on logout")
+		utils.Success(c, "Logged out successfully", nil)
+		return
+	}
+	tokenString := authHeader
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+
+	// Parse the token to get expiry
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_SECRET")), nil
+	})
+	if err != nil {
+		utils.LogError("Failed to parse token on logout: %v", err)
+		utils.Success(c, "Logged out successfully", nil)
+		return
+	}
+
+	var expiresAt time.Time
+	if claims, ok := token.Claims.(jwt.MapClaims); ok {
+		if exp, ok := claims["exp"].(float64); ok {
+			expiresAt = time.Unix(int64(exp), 0)
+		} else {
+			expiresAt = time.Now().Add(24 * time.Hour) // fallback
+		}
+	} else {
+		expiresAt = time.Now().Add(24 * time.Hour) // fallback
+	}
+
+	// Blacklist the token
+	blacklisted := models.BlacklistedToken{
+		Token:     tokenString,
+		ExpiresAt: expiresAt,
+	}
+	if err := config.DB.Create(&blacklisted).Error; err != nil {
+		utils.LogError("Failed to blacklist token on logout: %v", err)
+	}
+
+	utils.LogDebug("Client-side logout processed and token blacklisted")
 	utils.Success(c, "Logged out successfully", nil)
 }
 

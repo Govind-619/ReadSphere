@@ -8,6 +8,7 @@ import (
 const (
 	OrderStatusPlaced          = "Placed"
 	OrderStatusProcessing      = "Processing"
+	OrderStatusPaid            = "Paid"
 	OrderStatusShipped         = "Shipped"
 	OrderStatusDelivered       = "Delivered"
 	OrderStatusCancelled       = "Cancelled"
@@ -31,6 +32,8 @@ type Order struct {
 	CouponID                    uint        `json:"coupon_id"`
 	CouponCode                  string      `json:"coupon_code"`
 	FinalTotal                  float64     `json:"final_total"`
+	DeliveryCharge              float64     `json:"delivery_charge" gorm:"default:0"`
+	TotalWithDelivery           float64     `json:"total_with_delivery"`
 	PaymentMethod               string      `json:"payment_method"`
 	PaymentID                   string      `json:"payment_id"`
 	RazorpayOrderID             string      `json:"razorpay_order_id"`

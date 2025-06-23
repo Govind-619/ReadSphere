@@ -79,7 +79,7 @@ func CancelOrderItem(c *gin.Context) {
 	}
 
 	// Check order status and cancellation window
-	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusProcessing {
+	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusPaid {
 		utils.LogError("Order cannot be cancelled - Order ID: %d, Status: %s", orderID, order.Status)
 		tx.Rollback()
 		utils.BadRequest(c, "Items can only be cancelled before shipping", nil)
@@ -115,18 +115,26 @@ func CancelOrderItem(c *gin.Context) {
 	}
 	utils.LogDebug("Found item ID: %d in order ID: %d", itemID, orderID)
 
-	// Calculate refund amount for this item
-	// Start with the final price after item discount
-	refundAmount := item.Price*float64(item.Quantity) - item.Discount
-
-	if order.CouponDiscount > 0 {
-		// Calculate the proportion of the cancelled item's total to the original order total
-		originalOrderTotal := order.TotalAmount
-		cancelledItemTotal := item.Price*float64(item.Quantity) - item.Discount // Use discounted total
-		couponDiscountToRemove := (cancelledItemTotal / originalOrderTotal) * order.CouponDiscount
-		refundAmount -= couponDiscountToRemove
+	// Check if item is already cancelled or has a pending cancellation request
+	if item.CancellationRequested {
+		utils.LogError("Item already has a cancellation request - Order ID: %d, Item ID: %d, Status: %s", orderID, itemID, item.CancellationStatus)
+		tx.Rollback()
+		utils.BadRequest(c, "This item has already been cancelled or has a pending cancellation request", nil)
+		return
 	}
-	utils.LogInfo("Calculated refund amount: %.2f for order ID: %d, book ID: %d", refundAmount, order.ID, item.BookID)
+
+	// Check if item is already cancelled
+	if item.CancellationStatus == "Cancelled" {
+		utils.LogError("Item already cancelled - Order ID: %d, Item ID: %d", orderID, itemID)
+		tx.Rollback()
+		utils.BadRequest(c, "This item has already been cancelled", nil)
+		return
+	}
+
+	// Calculate refund amount for this item
+	// Use the final price the customer actually paid for this item
+	refundAmount := item.Total - item.CouponDiscount // This is the final price after all discounts
+	utils.LogInfo("Calculated refund amount: %.2f for order ID: %d, book ID: %d (final price paid: %.2f - %.2f coupon)", refundAmount, order.ID, item.BookID, item.Total, item.CouponDiscount)
 
 	// Update item status
 	item.CancellationRequested = true
@@ -159,12 +167,13 @@ func CancelOrderItem(c *gin.Context) {
 		"cancellation_reason": req.Reason,
 		"refund_amount":       fmt.Sprintf("%.2f", refundAmount),
 		"refund_details": gin.H{
-			"item_total":      fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
-			"item_discount":   fmt.Sprintf("%.2f", item.Discount),
-			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
-			"total_refunded":  fmt.Sprintf("%.2f", refundAmount),
-			"refund_status":   "pending",
-			"refunded_to":     "wallet",
+			"item_total":       fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
+			"item_discount":    fmt.Sprintf("%.2f", item.Discount),
+			"coupon_discount":  fmt.Sprintf("%.2f", item.CouponDiscount),
+			"final_price_paid": fmt.Sprintf("%.2f", item.Total-item.CouponDiscount),
+			"total_refunded":   fmt.Sprintf("%.2f", refundAmount),
+			"refund_status":    "refunded to wallet",
+			"refunded_to":      "wallet",
 		},
 	}
 
@@ -218,12 +227,13 @@ func CancelOrderItem(c *gin.Context) {
 		utils.LogDebug("Updated item refund status to completed - Item ID: %d", itemID)
 
 		itemResponse["refund_details"] = gin.H{
-			"item_total":      fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
-			"item_discount":   fmt.Sprintf("%.2f", item.Discount),
-			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
-			"total_refunded":  fmt.Sprintf("%.2f", refundAmount),
-			"refund_status":   "completed",
-			"refunded_to":     "wallet",
+			"item_total":       fmt.Sprintf("%.2f", item.Price*float64(item.Quantity)),
+			"item_discount":    fmt.Sprintf("%.2f", item.Discount),
+			"coupon_discount":  fmt.Sprintf("%.2f", item.CouponDiscount),
+			"final_price_paid": fmt.Sprintf("%.2f", item.Total-item.CouponDiscount),
+			"total_refunded":   fmt.Sprintf("%.2f", refundAmount),
+			"refund_status":    "refunded to wallet",
+			"refunded_to":      "wallet",
 			"transaction": gin.H{
 				"id":          transaction.ID,
 				"wallet_id":   transaction.WalletID,
@@ -255,6 +265,8 @@ func CancelOrderItem(c *gin.Context) {
 
 	// Calculate final total after all adjustments
 	order.FinalTotal = order.TotalAmount - order.Discount - order.CouponDiscount
+	// Add delivery charge to final total
+	order.TotalWithDelivery = order.FinalTotal + order.DeliveryCharge
 
 	if err := tx.Save(&order).Error; err != nil {
 		utils.LogError("Failed to update order totals - Order ID: %d: %v", orderID, err)
@@ -279,7 +291,7 @@ func CancelOrderItem(c *gin.Context) {
 			"discount":        fmt.Sprintf("%.2f", order.Discount),
 			"coupon_discount": fmt.Sprintf("%.2f", order.CouponDiscount),
 			"coupon_code":     order.CouponCode,
-			"final_total":     fmt.Sprintf("%.2f", order.FinalTotal),
+			"final_total":     fmt.Sprintf("%.2f", order.TotalWithDelivery),
 		},
 	})
 }

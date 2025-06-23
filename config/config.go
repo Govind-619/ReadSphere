@@ -157,14 +157,17 @@ func MigrateDB() error {
 		&models.Order{},
 		&models.OrderItem{},
 		&models.Wishlist{},
-		&models.Coupon{},   // Migrate Coupon first
-		&models.Referral{}, // Then Referral which depends on Coupon
+		&models.Coupon{},           // Migrate Coupon first
+		&models.UserReferralCode{}, // New referral system
+		&models.ReferralUsage{},    // New referral usage tracking
+		&models.Referral{},         // Legacy - can be removed later
 		&models.ReferralSignup{},
 		&models.ProductOffer{},
 		&models.CategoryOffer{},
 		&models.Wallet{},
 		&models.WalletTransaction{},
 		&models.WalletTopupOrder{},
+		&models.BlacklistedToken{},
 	); err != nil {
 		log.Printf("Failed to migrate database: %v", err)
 		return err

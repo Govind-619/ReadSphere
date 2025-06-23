@@ -63,7 +63,7 @@ func CancelOrder(c *gin.Context) {
 	}
 
 	// Check if order can be cancelled based on status and time
-	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusProcessing {
+	if order.Status != models.OrderStatusPlaced && order.Status != models.OrderStatusPaid {
 		utils.LogError("Order cannot be cancelled - Order ID: %d, Status: %s", orderID, order.Status)
 		utils.BadRequest(c, "Order cannot be cancelled at this stage", nil)
 		return
@@ -101,7 +101,16 @@ func CancelOrder(c *gin.Context) {
 	order.Status = models.OrderStatusCancelled
 	order.CancellationReason = req.Reason
 	order.RefundStatus = "pending"
-	order.RefundAmount = order.FinalTotal
+
+	// Calculate refund amount - use the existing order data
+	refundAmount := order.FinalTotal // This is the final amount after all discounts
+	if time.Since(order.CreatedAt) <= 30*time.Minute {
+		// Include delivery charge in refund for orders cancelled within 30 minutes
+		refundAmount = order.TotalWithDelivery // This includes delivery charge
+	}
+	utils.LogInfo("Calculated refund amount: %.2f for order ID: %d (using existing order data)", refundAmount, orderID)
+
+	order.RefundAmount = refundAmount
 	order.RefundedToWallet = true
 	order.UpdatedAt = time.Now()
 
@@ -134,7 +143,7 @@ func CancelOrder(c *gin.Context) {
 		reference := fmt.Sprintf("REFUND-ORDER-%d", orderID)
 		description := fmt.Sprintf("Refund for cancelled order #%d", orderID)
 
-		transaction, err = utils.CreateWalletTransaction(wallet.ID, order.FinalTotal, models.TransactionTypeCredit, description, &orderIDUint, reference)
+		transaction, err = utils.CreateWalletTransaction(wallet.ID, refundAmount, models.TransactionTypeCredit, description, &orderIDUint, reference)
 		if err != nil {
 			utils.LogError("Failed to create wallet transaction - Order ID: %d: %v", orderID, err)
 			tx.Rollback()
@@ -144,13 +153,13 @@ func CancelOrder(c *gin.Context) {
 		utils.LogDebug("Created wallet transaction - Transaction ID: %d, Amount: %.2f", transaction.ID, transaction.Amount)
 
 		// Update wallet balance
-		if err := utils.UpdateWalletBalance(wallet.ID, order.FinalTotal, models.TransactionTypeCredit); err != nil {
+		if err := utils.UpdateWalletBalance(wallet.ID, refundAmount, models.TransactionTypeCredit); err != nil {
 			utils.LogError("Failed to update wallet balance - Wallet ID: %d, Order ID: %d: %v", wallet.ID, orderID, err)
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update wallet balance"})
 			return
 		}
-		utils.LogDebug("Updated wallet balance - Wallet ID: %d, Amount: %.2f", wallet.ID, order.FinalTotal)
+		utils.LogDebug("Updated wallet balance - Wallet ID: %d, Amount: %.2f", wallet.ID, refundAmount)
 
 		// Update order refund status
 		now := time.Now()
@@ -195,8 +204,17 @@ func CancelOrder(c *gin.Context) {
 				"id":            order.ID,
 				"status":        order.Status,
 				"refund_amount": fmt.Sprintf("%.2f", order.RefundAmount),
-				"refund_status": order.RefundStatus,
+				"refund_status": "refunded to wallet",
 				"refunded_at":   order.RefundedAt.Format("2006-01-02 15:04:05"),
+				"refund_details": gin.H{
+					"original_total":      fmt.Sprintf("%.2f", order.TotalAmount),
+					"discount":            fmt.Sprintf("%.2f", order.Discount),
+					"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+					"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+					"final_total":         fmt.Sprintf("%.2f", order.FinalTotal),
+					"total_with_delivery": fmt.Sprintf("%.2f", order.TotalWithDelivery),
+					"amount_refunded":     fmt.Sprintf("%.2f", refundAmount),
+				},
 			},
 			"transaction": gin.H{
 				"id":          transaction.ID,

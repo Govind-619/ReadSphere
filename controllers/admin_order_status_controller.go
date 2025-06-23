@@ -181,15 +181,21 @@ func AdminUpdateOrderStatus(c *gin.Context) {
 	utils.LogInfo("Successfully updated order %d status to %s", orderID, order.Status)
 	utils.Success(c, "Order status updated successfully", gin.H{
 		"order": gin.H{
-			"id":           fullOrder.ID,
-			"username":     fullOrder.User.Username,
-			"email":        fullOrder.User.Email,
-			"status":       fullOrder.Status,
-			"final_total":  fmt.Sprintf("%.2f", fullOrder.FinalTotal),
-			"created_at":   fullOrder.CreatedAt.Format("2006-01-02 15:04:05"),
-			"updated_at":   fullOrder.UpdatedAt.Format("2006-01-02 15:04:05"),
-			"payment_mode": fullOrder.PaymentMethod,
-			"items":        items,
+			"id":                  fullOrder.ID,
+			"username":            fullOrder.User.Username,
+			"email":               fullOrder.User.Email,
+			"status":              fullOrder.Status,
+			"total_amount":        fmt.Sprintf("%.2f", fullOrder.TotalAmount),
+			"discount":            fmt.Sprintf("%.2f", fullOrder.Discount),
+			"coupon_discount":     fmt.Sprintf("%.2f", fullOrder.CouponDiscount),
+			"coupon_code":         fullOrder.CouponCode,
+			"delivery_charge":     fmt.Sprintf("%.2f", fullOrder.DeliveryCharge),
+			"total_with_delivery": fmt.Sprintf("%.2f", fullOrder.TotalWithDelivery),
+			"final_total":         fmt.Sprintf("%.2f", fullOrder.FinalTotal),
+			"created_at":          fullOrder.CreatedAt.Format("2006-01-02 15:04:05"),
+			"updated_at":          fullOrder.UpdatedAt.Format("2006-01-02 15:04:05"),
+			"payment_mode":        fullOrder.PaymentMethod,
+			"items":               items,
 		},
 	})
 }

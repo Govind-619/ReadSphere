@@ -95,13 +95,15 @@ func RegisterUser(c *gin.Context) {
 		}
 	}
 
-	// Validate phone if provided
+	// Validate and format phone if provided
 	if req.Phone != "" {
-		if valid, msg := utils.ValidatePhone(req.Phone); !valid {
-			utils.LogError("Registration attempt failed - Invalid phone: %s - %s", req.Phone, msg)
-			utils.BadRequest(c, "Invalid phone", msg)
+		valid, formattedPhone := utils.ValidatePhone(req.Phone)
+		if !valid {
+			utils.LogError("Registration attempt failed - Invalid phone: %s - %s", req.Phone, formattedPhone)
+			utils.BadRequest(c, "Invalid phone", formattedPhone)
 			return
 		}
+		req.Phone = formattedPhone
 	}
 
 	// Check for SQL injection in all fields
@@ -171,6 +173,15 @@ func RegisterUser(c *gin.Context) {
 		utils.LogError("Registration attempt failed - Email already exists: %s", req.Email)
 		utils.Conflict(c, "Email already exists", "An account with this email address already exists. Please use a different email or try logging in.")
 		return
+	}
+
+	// Check if phone already exists
+	if req.Phone != "" {
+		if err := config.DB.Where("phone = ?", req.Phone).First(&existingUser).Error; err == nil {
+			utils.LogError("Registration attempt failed - Phone already exists: %s", req.Phone)
+			utils.Conflict(c, "Phone number already exists", "An account with this phone number already exists. Please use a different phone number or try logging in.")
+			return
+		}
 	}
 
 	//Hash password

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Govind-619/ReadSphere/config"
 	"github.com/Govind-619/ReadSphere/models"
@@ -17,17 +18,34 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		utils.LogInfo("AuthMiddleware called")
 
+		// Get the token from the request
 		authHeader := c.GetHeader("Authorization")
+
+		// Validate the token
 		if authHeader == "" {
 			utils.LogError("Missing Authorization header")
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			c.Abort()
 			return
 		}
 
 		// Extract token from Bearer header
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+		// Check if token is blacklisted
+		var blacklistedToken models.BlacklistedToken
+		if err := config.DB.Where("token = ? AND expires_at > ?", tokenString, time.Now()).First(&blacklistedToken).Error; err == nil {
+			utils.LogError("Token is blacklisted")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has been invalidated, Please login for access"})
+			c.Abort()
+			return
+		}
+
+		// Parse and validate token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 
@@ -54,6 +72,15 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Check token expiration
+		exp, ok := claims["exp"].(float64)
+		if !ok || float64(time.Now().Unix()) > exp {
+			utils.LogError("Token has expired")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has expired"})
+			c.Abort()
+			return
+		}
+
 		// Get user from database
 		userID := uint(claims["user_id"].(float64))
 		utils.LogDebug("Authenticating user ID: %d", userID)
@@ -75,6 +102,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		// Set user in context
 		c.Set("user", user)
+		c.Set("user_id", user.ID)
 		utils.LogInfo("User %d authenticated successfully", userID)
 		c.Next()
 	}
@@ -129,6 +157,15 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 		if tokenString == authHeader {
 			utils.LogError("Invalid Bearer token format")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Please login for access"})
+			c.Abort()
+			return
+		}
+
+		// Blacklist check for admin tokens
+		var blacklistedToken models.BlacklistedToken
+		if err := config.DB.Where("token = ? AND expires_at > ?", tokenString, time.Now()).First(&blacklistedToken).Error; err == nil {
+			utils.LogError("Admin token is blacklisted")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has been invalidated, Please login for access"})
 			c.Abort()
 			return
 		}

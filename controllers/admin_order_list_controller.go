@@ -103,14 +103,19 @@ func AdminListOrders(c *gin.Context) {
 	var orderResponses []gin.H
 	for _, order := range orders {
 		orderResponses = append(orderResponses, gin.H{
-			"id":           order.ID,
-			"username":     order.User.Username,
-			"email":        order.User.Email,
-			"status":       order.Status,
-			"final_total":  fmt.Sprintf("%.2f", order.FinalTotal),
-			"created_at":   order.CreatedAt.Format("2006-01-02 15:04:05"),
-			"item_count":   len(order.OrderItems),
-			"payment_mode": order.PaymentMethod,
+			"id":                  order.ID,
+			"username":            order.User.Username,
+			"email":               order.User.Email,
+			"status":              order.Status,
+			"total_amount":        fmt.Sprintf("%.2f", order.TotalAmount),
+			"discount":            fmt.Sprintf("%.2f", order.Discount),
+			"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+			"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+			"total_with_delivery": fmt.Sprintf("%.2f", order.TotalWithDelivery),
+			"final_total":         fmt.Sprintf("%.2f", order.FinalTotal),
+			"created_at":          order.CreatedAt.Format("2006-01-02 15:04:05"),
+			"item_count":          len(order.OrderItems),
+			"payment_mode":        order.PaymentMethod,
 		})
 	}
 	utils.LogDebug("Prepared response for %d orders", len(orderResponses))
@@ -208,13 +213,19 @@ func AdminGetOrderDetails(c *gin.Context) {
 	utils.LogInfo("Successfully retrieved details for order ID: %d", orderID)
 	utils.Success(c, "Order details retrieved successfully", gin.H{
 		"order": gin.H{
-			"id":           order.ID,
-			"username":     order.User.Username,
-			"email":        order.User.Email,
-			"status":       order.Status,
-			"final_total":  fmt.Sprintf("%.2f", order.FinalTotal),
-			"created_at":   order.CreatedAt.Format("2006-01-02 15:04:05"),
-			"payment_mode": order.PaymentMethod,
+			"id":                  order.ID,
+			"username":            order.User.Username,
+			"email":               order.User.Email,
+			"status":              order.Status,
+			"total_amount":        fmt.Sprintf("%.2f", order.TotalAmount),
+			"discount":            fmt.Sprintf("%.2f", order.Discount),
+			"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+			"coupon_code":         order.CouponCode,
+			"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+			"total_with_delivery": fmt.Sprintf("%.2f", order.TotalWithDelivery),
+			"final_total":         fmt.Sprintf("%.2f", order.FinalTotal),
+			"created_at":          order.CreatedAt.Format("2006-01-02 15:04:05"),
+			"payment_mode":        order.PaymentMethod,
 			"address": gin.H{
 				"line1":       order.Address.Line1,
 				"line2":       order.Address.Line2,

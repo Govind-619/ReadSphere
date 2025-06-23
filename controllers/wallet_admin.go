@@ -266,9 +266,10 @@ func updateWalletBalance(walletID uint, amount float64, transactionType string) 
 		return err
 	}
 
-	if transactionType == models.TransactionTypeCredit {
+	switch transactionType {
+	case models.TransactionTypeCredit:
 		wallet.Balance += amount
-	} else if transactionType == models.TransactionTypeDebit {
+	case models.TransactionTypeDebit:
 		if wallet.Balance < amount {
 			utils.LogError("Insufficient balance - Wallet ID: %d, Required: %.2f, Available: %.2f", walletID, amount, wallet.Balance)
 			return fmt.Errorf("insufficient balance")

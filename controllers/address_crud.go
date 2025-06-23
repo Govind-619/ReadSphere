@@ -307,11 +307,25 @@ func DeleteAddress(c *gin.Context) {
 		return
 	}
 
+	// Store if this was the default address
+	wasDefault := address.IsDefault
+
 	// Perform the delete operation
 	if err := config.DB.Delete(&address).Error; err != nil {
 		utils.LogError("Failed to delete address for user ID: %d: %v", userModel.ID, err)
 		utils.InternalServerError(c, "Failed to delete address", err.Error())
 		return
+	}
+
+	// If the deleted address was default, set the most recently updated address as new default
+	if wasDefault {
+		var newDefault models.Address
+		if err := config.DB.Where("user_id = ?", userModel.ID).
+			Order("updated_at desc, created_at desc").
+			First(&newDefault).Error; err == nil {
+			config.DB.Model(&newDefault).Update("is_default", true)
+			utils.LogInfo("Set address ID %d as new default for user ID: %d", newDefault.ID, userModel.ID)
+		}
 	}
 
 	utils.LogInfo("Address deleted successfully for user ID: %d, address ID: %d", userModel.ID, address.ID)

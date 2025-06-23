@@ -17,6 +17,7 @@ ReadSphere is a full-featured e-commerce platform for books, built with Go, Gin,
 - [🤝 Contributing](#-contributing)
 - [📝 License](#-license)
 - [📧 Contact](#-contact)
+- [Recent Changes](#recent-changes)
 
 ## ✨ Key Features
 
@@ -725,3 +726,15 @@ Each command can also be run manually without Make if needed. See the command de
    - Logs are rotated automatically to prevent disk space issues
    - Contains four log levels: INFO, WARNING, ERROR, and DEBUG
    - Sensitive data is automatically scrubbed from logs
+
+## Recent Changes
+
+- Added checkout flow with summary and order placement (Cash on Delivery supported)
+- Introduced robust Order and OrderItem models for order tracking
+- Unified cart and wishlist logic for consistent user experience and auto-sync
+- Automatic inventory adjustment on order, return, and cancellation
+- Wishlist management: add, view, remove books; auto-sync with cart actions
+- Admin sales report export as Excel or PDF, including analytics (top/bottom 5 products, top customers, financials, order status summary)
+- Offer management: create, list, update, and delete product and category offers
+- RESTful 404 error handling for non-existent offer deletion, with descriptive error messages
+- Improved error handling throughout the API for better feedback and RESTful correctness

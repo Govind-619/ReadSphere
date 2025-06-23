@@ -107,20 +107,21 @@ func UpdateProfile(c *gin.Context) {
 
 	// Phone validation and uniqueness
 	if req.Phone != "" && req.Phone != userModel.Phone {
-		if valid, msg := utils.ValidatePhone(req.Phone); !valid {
-			utils.LogError("Invalid phone: %s", msg)
-			utils.BadRequest(c, msg, nil)
+		valid, formattedPhone := utils.ValidatePhone(req.Phone)
+		if !valid {
+			utils.LogError("Invalid phone: %s", formattedPhone)
+			utils.BadRequest(c, formattedPhone, nil)
 			return
 		}
 		// Check uniqueness
 		var existingUser models.User
-		if err := config.DB.Where("phone = ? AND id != ?", req.Phone, userModel.ID).First(&existingUser).Error; err == nil {
-			utils.LogError("Phone number already exists: %s", req.Phone)
+		if err := config.DB.Where("phone = ? AND id != ?", formattedPhone, userModel.ID).First(&existingUser).Error; err == nil {
+			utils.LogError("Phone number already exists: %s", formattedPhone)
 			utils.Conflict(c, "Phone number already exists", nil)
 			return
 		}
-		updates["phone"] = req.Phone
-		utils.LogInfo("Phone updated to: %s", req.Phone)
+		updates["phone"] = formattedPhone
+		utils.LogInfo("Phone updated to: %s", formattedPhone)
 	}
 
 	if len(updates) == 0 {

@@ -49,11 +49,9 @@ func AdminListReturnRequests(c *gin.Context) {
 
 	// Apply different filters based on the route
 	if showAllReturns {
-		// For /returns route - show all returns including approved and rejected
-		query = query.Where(
-			"EXISTS (SELECT 1 FROM order_items WHERE order_items.order_id = orders.id AND order_items.return_requested = true)",
-		)
-		utils.LogDebug("Applied filter for all returns")
+		// For /returns route - show only entire order returns (orders with status "Return Requested")
+		query = query.Where("status = ?", models.OrderStatusReturnRequested)
+		utils.LogDebug("Applied filter for entire order returns only")
 	} else {
 		// For /return-items route - show only orders with pending returns
 		query = query.Where(
@@ -136,13 +134,18 @@ func AdminListReturnRequests(c *gin.Context) {
 			}
 
 			returnRequests = append(returnRequests, gin.H{
-				"id":            order.ID,
-				"username":      order.User.Username,
-				"email":         order.User.Email,
-				"status":        order.Status,
-				"final_total":   fmt.Sprintf("%.2f", order.FinalTotal),
-				"created_at":    order.CreatedAt.Format("2006-01-02 15:04:05"),
-				"return_reason": order.ReturnReason,
+				"id":                  order.ID,
+				"username":            order.User.Username,
+				"email":               order.User.Email,
+				"status":              order.Status,
+				"total_amount":        fmt.Sprintf("%.2f", order.TotalAmount),
+				"discount":            fmt.Sprintf("%.2f", order.Discount),
+				"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+				"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+				"total_with_delivery": fmt.Sprintf("%.2f", order.TotalWithDelivery),
+				"final_total":         fmt.Sprintf("%.2f", order.FinalTotal),
+				"created_at":          order.CreatedAt.Format("2006-01-02 15:04:05"),
+				"return_reason":       order.ReturnReason,
 				"return_status": gin.H{
 					"total_items":    stats.total,
 					"pending_items":  stats.pending,
@@ -271,14 +274,19 @@ func AdminListAllReturns(c *gin.Context) {
 		utils.LogDebug("Processed %d return items for order %d", len(items), order.ID)
 
 		returnRequests = append(returnRequests, gin.H{
-			"id":            order.ID,
-			"username":      order.User.Username,
-			"email":         order.User.Email,
-			"status":        order.Status,
-			"final_total":   fmt.Sprintf("%.2f", order.FinalTotal),
-			"created_at":    order.CreatedAt.Format("2006-01-02 15:04:05"),
-			"return_reason": order.ReturnReason,
-			"return_items":  items,
+			"id":                  order.ID,
+			"username":            order.User.Username,
+			"email":               order.User.Email,
+			"status":              order.Status,
+			"total_amount":        fmt.Sprintf("%.2f", order.TotalAmount),
+			"discount":            fmt.Sprintf("%.2f", order.Discount),
+			"coupon_discount":     fmt.Sprintf("%.2f", order.CouponDiscount),
+			"delivery_charge":     fmt.Sprintf("%.2f", order.DeliveryCharge),
+			"total_with_delivery": fmt.Sprintf("%.2f", order.TotalWithDelivery),
+			"final_total":         fmt.Sprintf("%.2f", order.FinalTotal),
+			"created_at":          order.CreatedAt.Format("2006-01-02 15:04:05"),
+			"return_reason":       order.ReturnReason,
+			"return_items":        items,
 			"return_summary": gin.H{
 				"total_items":    stats.total,
 				"pending_items":  stats.pending,

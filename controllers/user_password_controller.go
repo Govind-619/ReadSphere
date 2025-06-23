@@ -45,7 +45,7 @@ func ForgotPassword(c *gin.Context) {
 	// Generate OTP
 	otp := generateOTP()
 	log.Println("Forgot Password OTP:", otp)
-	utils.LogInfo("Password reset OTP generated for %s: %s", req.Email, otp)
+	utils.LogInfo("Password reset OTP generated for %s", req.Email)
 
 	// Store email and OTP in session
 	session := sessions.Default(c)
@@ -101,7 +101,7 @@ func VerifyResetOTP(c *gin.Context) {
 		// Generate new OTP
 		newOTP := generateOTP()
 		log.Println("Reset OTP expired, sending new OTP:", newOTP)
-		utils.LogInfo("Password reset OTP expired, generating new OTP for %s: %s", email, newOTP)
+		utils.LogInfo("Password reset OTP expired, generating new OTP for %s", email)
 
 		// Update session with new OTP and expiration time
 		session.Set("reset_otp", newOTP)

@@ -22,15 +22,18 @@ func AdminListReturnItems(c *gin.Context) {
 		return
 	}
 
-	// Query all orders with return requests
+	// Query all orders with individual item return requests (not entire order returns)
 	var orders []models.Order
 	query := config.DB.Preload("User").
 		Preload("OrderItems.Book").
 		Preload("OrderItems", func(db *gorm.DB) *gorm.DB {
-			return db.Where("return_requested = ?", true)
+			return db.Where("return_requested = ? AND return_status IN (?, ?, ?, ?, ?, ?)", true,
+				models.OrderStatusReturnRequested, models.OrderStatusReturnApproved, models.OrderStatusReturnRejected,
+				"Pending", "Approved", "Rejected")
 		}).
-		Where("has_item_return_requests = ? OR EXISTS (SELECT 1 FROM order_items WHERE order_items.order_id = orders.id AND return_requested = true)", true)
-	utils.LogDebug("Built base query for return items")
+		Where("EXISTS (SELECT 1 FROM order_items WHERE order_items.order_id = orders.id AND return_requested = true)").
+		Order("updated_at DESC") // Sort by most recent first
+	utils.LogDebug("Built base query for individual item returns")
 
 	// Pagination
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -43,12 +46,16 @@ func AdminListReturnItems(c *gin.Context) {
 	}
 	utils.LogDebug("Pagination parameters - Page: %d, Limit: %d", page, limit)
 
-	// First, get total count of return items
+	// First, get total count of individual item returns (not entire order returns)
 	var total int64
 	config.DB.Model(&models.OrderItem{}).
-		Where("return_requested = ?", true).
+		Joins("JOIN orders ON order_items.order_id = orders.id").
+		Where("order_items.return_requested = ? AND order_items.return_status IN (?, ?, ?, ?, ?, ?)",
+			true,
+			models.OrderStatusReturnRequested, models.OrderStatusReturnApproved, models.OrderStatusReturnRejected,
+			"Pending", "Approved", "Rejected").
 		Count(&total)
-	utils.LogDebug("Total return items found: %d", total)
+	utils.LogDebug("Total individual item returns found: %d", total)
 
 	// Get all orders but we'll paginate the items
 	if err := query.Find(&orders).Error; err != nil {
@@ -65,8 +72,22 @@ func AdminListReturnItems(c *gin.Context) {
 
 	// Process orders and collect items with pagination
 	for _, order := range orders {
+		utils.LogDebug("Processing order ID: %d, Status: %s, HasItemReturnRequests: %v", order.ID, order.Status, order.HasItemReturnRequests)
+
+		// Skip orders that have status "Return Requested" (these are entire order returns)
+		if order.Status == models.OrderStatusReturnRequested {
+			utils.LogDebug("Skipping order ID: %d - entire order return", order.ID)
+			continue
+		}
+
 		for _, item := range order.OrderItems {
-			if item.ReturnRequested {
+			utils.LogDebug("Checking item ID: %d, ReturnRequested: %v, ReturnStatus: %s", item.ID, item.ReturnRequested, item.ReturnStatus)
+
+			// Ensure only individual item return requests are processed
+			if item.ReturnRequested && (item.ReturnStatus == models.OrderStatusReturnRequested || item.ReturnStatus == models.OrderStatusReturnApproved || item.ReturnStatus == models.OrderStatusReturnRejected ||
+				item.ReturnStatus == "Pending" || item.ReturnStatus == "Approved" || item.ReturnStatus == "Rejected") {
+				utils.LogDebug("Processing return item ID: %d with status: %s", item.ID, item.ReturnStatus)
+
 				// Skip items before the start index
 				if itemCount < startIdx {
 					itemCount++
@@ -91,27 +112,30 @@ func AdminListReturnItems(c *gin.Context) {
 					"requested_at": order.UpdatedAt.Format("2006-01-02 15:04:05"),
 				}
 
-				// Set default refund status
-				req["refund_status"] = "pending"
-				req["refund_amount"] = 0.0
+				// Calculate refund amount based on item total
+				refundAmount := item.Total
+				req["refund_amount"] = refundAmount
 
-				// Handle different return statuses
+				// Handle different return statuses (support both old and new formats)
 				switch item.ReturnStatus {
-				case "Approved":
+				case models.OrderStatusReturnApproved, "Approved":
 					if item.RefundedAt != nil {
 						req["processed_at"] = item.RefundedAt.Format("2006-01-02 15:04:05")
 						req["refund_status"] = "completed"
-						req["refund_amount"] = item.RefundAmount
+						req["refund_amount"] = item.RefundAmount // Use actual refunded amount if available
 					} else {
 						req["processed_at"] = order.UpdatedAt.Format("2006-01-02 15:04:05")
 						req["refund_status"] = "processing"
+						req["refund_amount"] = refundAmount
 					}
-				case "Rejected":
+				case models.OrderStatusReturnRejected, "Rejected":
 					req["processed_at"] = order.UpdatedAt.Format("2006-01-02 15:04:05")
 					req["reject_reason"] = item.ReturnReason
 					req["refund_status"] = "rejected"
-				case "Pending":
+					req["refund_amount"] = 0.0 // No refund for rejected items
+				case models.OrderStatusReturnRequested, "Pending":
 					req["refund_status"] = "pending"
+					req["refund_amount"] = refundAmount
 				}
 
 				requests = append(requests, req)

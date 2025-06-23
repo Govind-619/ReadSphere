@@ -4,7 +4,11 @@ import (
 	"crypto/rand"
 	"math/big"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/Govind-619/ReadSphere/config"
+	"github.com/Govind-619/ReadSphere/models"
 	"github.com/Govind-619/ReadSphere/utils"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -17,11 +21,36 @@ func UserLogout(c *gin.Context) {
 		utils.LogInfo("User %d logging out", userID)
 	}
 
+	// Clear session
 	session := sessions.Default(c)
 	session.Clear()
-	session.Save()
+	err := session.Save()
+	if err != nil {
+		utils.LogError("Failed to save cleared session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to logout"})
+		return
+	}
 
-	utils.LogInfo("User session cleared successfully")
+	// Get the token from the request
+	token := c.GetHeader("Authorization")
+	if token != "" {
+		// Remove "Bearer " prefix if present
+		token = strings.TrimPrefix(token, "Bearer ")
+
+		// Add token to blacklist
+		blacklistedToken := models.BlacklistedToken{
+			Token:     token,
+			ExpiresAt: time.Now().Add(24 * time.Hour), // Same as JWT expiration
+		}
+
+		if err := config.DB.Create(&blacklistedToken).Error; err != nil {
+			utils.LogError("Failed to blacklist token: %v", err)
+		} else {
+			utils.LogInfo("Token blacklisted for user %d", userID)
+		}
+	}
+
+	utils.LogInfo("User session cleared and token blacklisted successfully")
 	utils.Success(c, "Logout successful", nil)
 }
 

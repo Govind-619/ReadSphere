@@ -227,9 +227,16 @@ func VerifyOTP(c *gin.Context) {
 		return
 	}
 
+	// Create referral code for the new user
+	_, err = GetOrCreateUserReferralCode(user.ID)
+	if err != nil {
+		utils.LogError("Failed to create referral code for new user: %s - %v", email, err)
+		// Don't fail registration if referral code creation fails
+	}
+
 	// Process referral code if present in registration claims
 	if referralCode, ok := claims["referral_code"].(string); ok && referralCode != "" {
-		err := AcceptReferralCodeAtSignup(user.ID, referralCode)
+		err := UseReferralCode(referralCode, user.ID)
 		if err != nil {
 			utils.LogError("Failed to process referral code for user: %s", email)
 			utils.BadRequest(c, "Invalid referral code", "Invalid or expired referral code")
