@@ -52,6 +52,7 @@ type Order struct {
 	CreatedAt                   time.Time   `json:"created_at"`
 	UpdatedAt                   time.Time   `json:"updated_at"`
 	OrderItems                  []OrderItem `json:"items" gorm:"foreignKey:OrderID"`
+	OriginalDetails             string      `json:"original_details" gorm:"type:json"`
 }
 
 type OrderItem struct {

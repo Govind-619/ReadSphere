@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -199,6 +200,15 @@ func GetOrderDetails(c *gin.Context) {
 
 	canReturn := order.Status == models.OrderStatusDelivered
 
+	// Unmarshal original_details if present
+	var originalDetailsObj interface{}
+	if order.OriginalDetails != "" {
+		err := json.Unmarshal([]byte(order.OriginalDetails), &originalDetailsObj)
+		if err != nil {
+			originalDetailsObj = order.OriginalDetails // fallback to string if invalid JSON
+		}
+	}
+
 	resp := gin.H{
 		"order_id":        order.ID,
 		"date":            order.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -217,6 +227,7 @@ func GetOrderDetails(c *gin.Context) {
 			"can_cancel": canCancel,
 			"can_return": canReturn,
 		},
+		"original_details": originalDetailsObj,
 	}
 
 	utils.LogInfo("Successfully retrieved order details for order ID: %d", orderID)

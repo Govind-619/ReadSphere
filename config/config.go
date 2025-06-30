@@ -180,6 +180,7 @@ func MigrateDB() error {
 func InitDB() {
 	config, err := LoadConfig()
 	if err != nil {
+		log.Printf("Failed to load config: %v", err)
 		panic(fmt.Sprintf("Failed to load config: %v", err))
 	}
 
@@ -212,6 +213,7 @@ func InitDB() {
 		)
 	`).Scan(&columnExists).Error
 	if err != nil {
+		log.Printf("Failed to check column existence: %v", err)
 		panic(fmt.Sprintf("Failed to check column existence: %v", err))
 	}
 
@@ -219,6 +221,7 @@ func InitDB() {
 		// Add username column as nullable first
 		err = DB.Exec(`ALTER TABLE users ADD COLUMN username text`).Error
 		if err != nil {
+			log.Printf("Failed to add username column: %v", err)
 			panic(fmt.Sprintf("Failed to add username column: %v", err))
 		}
 
@@ -229,12 +232,14 @@ func InitDB() {
 			WHERE username IS NULL
 		`).Error
 		if err != nil {
+			log.Printf("Failed to update existing users: %v", err)
 			panic(fmt.Sprintf("Failed to update existing users: %v", err))
 		}
 
 		// Make username column NOT NULL
 		err = DB.Exec(`ALTER TABLE users ALTER COLUMN username SET NOT NULL`).Error
 		if err != nil {
+			log.Printf("Failed to make username NOT NULL: %v", err)
 			panic(fmt.Sprintf("Failed to make username NOT NULL: %v", err))
 		}
 	}
@@ -246,18 +251,21 @@ func InitDB() {
 		ALTER COLUMN google_id SET DEFAULT NULL
 	`).Error
 	if err != nil {
+		log.Printf("Failed to update google_id column: %v", err)
 		panic(fmt.Sprintf("Failed to update google_id column: %v", err))
 	}
 
 	// Drop existing index if it exists
 	err = DB.Exec(`DROP INDEX IF EXISTS idx_coupons_code_lower`).Error
 	if err != nil {
+		log.Printf("Failed to drop existing index: %v", err)
 		panic(fmt.Sprintf("Failed to drop existing index: %v", err))
 	}
 
 	// Update existing coupon codes to uppercase
 	err = DB.Exec(`UPDATE coupons SET code = UPPER(code) WHERE code != UPPER(code)`).Error
 	if err != nil {
+		log.Printf("Failed to update existing coupon codes: %v", err)
 		panic(fmt.Sprintf("Failed to update existing coupon codes: %v", err))
 	}
 
@@ -267,6 +275,7 @@ func InitDB() {
 		ON coupons (LOWER(code))
 	`).Error
 	if err != nil {
+		log.Printf("Failed to create case-insensitive index: %v", err)
 		panic(fmt.Sprintf("Failed to create case-insensitive index: %v", err))
 	}
 }

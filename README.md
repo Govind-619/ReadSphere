@@ -8,6 +8,23 @@ ReadSphere is a full-featured e-commerce platform for books, built with Go, Gin,
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
+## ⚡ Quick Start
+
+```sh
+# Clone the repository
+https://github.com/yourusername/ReadSphereMVC.git
+cd ReadSphereMVC
+
+# Copy and edit environment variables
+cp .env.example .env   # Edit with your credentials
+
+# Install dependencies
+go mod tidy
+
+# Run the application
+go run main.go
+```
+
 ## Table of Contents
 - [✨ Key Features](#-key-features)
 - [🛠️ Technical Stack](#️-technical-stack)
@@ -377,31 +394,6 @@ and should not be committed to version control.
 - `GET /dashboard` - Dashboard overview
 - `GET /users` - List users
 - `PUT /users/:id/block` - Block user
-- `GET /categories` - List categories
-- `POST /categories` - Create category
-- `PUT /categories/:id` - Update category
-- `DELETE /categories/:id` - Delete category
-- `GET /categories/:id/books` - Books by category
-- `GET /books` - List books
-- `POST /books` - Create book
-- `PUT /books/field/:field/:value` - Update book by field
-- `GET /books/:id` - Book details
-- `PUT /books/:id` - Update book
-- `DELETE /books/:id` - Delete book
-- `GET /books/:id/check` - Check book exists
-- `GET /books/:id/reviews` - Get book reviews
-- `PUT /books/:id/reviews/:reviewId/approve` - Approve review
-- `DELETE /books/:id/reviews/:reviewId` - Delete review
-- `POST /genres` - Create genre
-- `PUT /genres/:id` - Update genre
-- `DELETE /genres/:id` - Delete genre
-- `GET /genres` - List genres
-- `GET /genres/:id` - Books by genre
-- `GET /orders` - List orders
-- `GET /orders/:id` - Order details
-- `PUT /orders/:id/status` - Update order status
-- `POST /orders/:id/return/accept` - Accept return
-- `POST /orders/:id/return/reject` - Reject return
 
 ### Profile (Protected, `/v1/profile/` prefix)
 - `GET ""` - Get user profile
@@ -738,3 +730,78 @@ Each command can also be run manually without Make if needed. See the command de
 - Offer management: create, list, update, and delete product and category offers
 - RESTful 404 error handling for non-existent offer deletion, with descriptive error messages
 - Improved error handling throughout the API for better feedback and RESTful correctness
+
+## 🌱 Environment Variables
+
+Create a `.env` file in the project root with the following variables:
+
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_NAME=readsphere
+JWT_SECRET=your_jwt_secret
+PORT=8080
+ENV=development
+RAZORPAY_KEY_ID=your_razorpay_key
+RAZORPAY_KEY_SECRET=your_razorpay_secret
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your_email@example.com
+SMTP_PASSWORD=your_email_password
+FRONTEND_URL=http://localhost:3000
+```
+
+> **Tip:** Never commit your real `.env` file to version control. Use `.env.example` for sharing variable names only.
+
+## 🚀 Deployment
+
+- **Build for production:**
+  ```sh
+  go build -o readsphere
+  ./readsphere
+  ```
+- **Or use Docker:**
+  ```sh
+  docker build -t readsphere .
+  docker run -p 8080:8080 readsphere
+  ```
+- **Set all required environment variables in your production environment.**
+
+---
+
+## 🛠️ Troubleshooting & FAQ
+
+- **Database connection errors:**
+  - Ensure PostgreSQL is running and credentials in `.env` are correct.
+- **Missing environment variables:**
+  - Double-check your `.env` file and variable names.
+- **Port already in use:**
+  - Change the `PORT` variable in your `.env` file.
+- **Email not sending:**
+  - Verify SMTP credentials and network access.
+- **Other issues:**
+  - Check logs in the `logs/` directory for more details.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! To contribute:
+- Fork the repository
+- Create a new branch for your feature or bugfix
+- Make your changes and add tests if possible
+- Open a pull request with a clear description
+
+---
+
+## 📝 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## 📧 Contact
+
+For questions, support, or feedback, please open an issue or contact the maintainer at [your_email@example.com].

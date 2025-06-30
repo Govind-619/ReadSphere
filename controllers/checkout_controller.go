@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -301,6 +302,34 @@ func PlaceOrder(c *gin.Context) {
 		return
 	}
 
+	// Before creating the order, serialize the original details
+	originalOrderSnapshot := struct {
+		UserID            uint               `json:"user_id"`
+		Address           models.Address     `json:"address"`
+		TotalAmount       float64            `json:"total_amount"`
+		Discount          float64            `json:"discount"`
+		CouponDiscount    float64            `json:"coupon_discount"`
+		CouponCode        string             `json:"coupon_code"`
+		FinalTotal        float64            `json:"final_total"`
+		DeliveryCharge    float64            `json:"delivery_charge"`
+		TotalWithDelivery float64            `json:"total_with_delivery"`
+		PaymentMethod     string             `json:"payment_method"`
+		OrderItems        []models.OrderItem `json:"order_items"`
+	}{
+		UserID:            userID,
+		Address:           address,
+		TotalAmount:       cartDetails.Subtotal,
+		Discount:          cartDetails.ProductDiscount + cartDetails.CategoryDiscount,
+		CouponDiscount:    cartDetails.CouponDiscount,
+		CouponCode:        cartDetails.CouponCode,
+		FinalTotal:        cartDetails.FinalTotal,
+		DeliveryCharge:    deliveryCharge,
+		TotalWithDelivery: totalWithDelivery,
+		PaymentMethod:     paymentMethod,
+		OrderItems:        cartDetails.OrderItems,
+	}
+	originalDetailsJSON, _ := json.Marshal(originalOrderSnapshot)
+
 	// Create order with transaction
 	tx := db.Begin()
 	if tx.Error != nil {
@@ -374,8 +403,9 @@ func PlaceOrder(c *gin.Context) {
 			}
 			return "" // For online, leave blank until payment is initiated
 		}(),
-		Status:     "Placed",
-		OrderItems: cartDetails.OrderItems,
+		Status:          "Placed",
+		OrderItems:      cartDetails.OrderItems,
+		OriginalDetails: string(originalDetailsJSON),
 	}
 
 	utils.LogInfo("Creating order for user ID: %d, total amount: %.2f, final total: %.2f, delivery charge: %.2f, total with delivery: %.2f",
