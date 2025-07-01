@@ -24,6 +24,13 @@ func SetupRouter() *gin.Engine {
 	})
 	router.Use(sessions.Sessions("readsphere", store))
 
+	// Root route for health check or info
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "Read Sphere backend is running...!",
+		})
+	})
+
 	// Auth routes (for OAuth)
 	auth := router.Group("/auth")
 	{
