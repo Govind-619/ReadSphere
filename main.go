@@ -8,6 +8,7 @@ import (
 	"github.com/Govind-619/ReadSphere/controllers"
 	"github.com/Govind-619/ReadSphere/routes"
 	"github.com/Govind-619/ReadSphere/utils"
+
 )
 
 func main() {
@@ -54,9 +55,10 @@ func main() {
 	router.Use(utils.RequestIDMiddleware())
 	router.Use(utils.SecurityHeadersMiddleware())
 
+
 	utils.LogInfo("Server starting on port 8080")
 	// Start server
-	if err := router.Run(":8080"); err != nil {
+	if err := router.Run("0.0.0.0:8080"); err != nil {
 		utils.LogError("Error starting server: %v", err)
 		log.Fatal("Error starting server:", err)
 	}
