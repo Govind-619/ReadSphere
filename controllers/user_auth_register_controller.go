@@ -237,7 +237,7 @@ func RegisterUser(c *gin.Context) {
 	}
 
 	utils.LogInfo("Registration OTP sent successfully to email: %s", req.Email)
-	utils.Success(c, "OTP sent to your email. Please verify to complete registration.", gin.H{
+	utils.Success(c, "OTP sent to your email. Please verify to complete Registration.", gin.H{
 		"registration_token": tokenString,
 		"expires_in":         900,
 	})
