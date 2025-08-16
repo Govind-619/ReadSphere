@@ -31,6 +31,7 @@ func SetupRouter() *gin.Engine {
 		})
 	})
 
+
 	// Auth routes (for OAuth)
 	auth := router.Group("/auth")
 	{
